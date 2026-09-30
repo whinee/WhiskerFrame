@@ -1,0 +1,2 @@
+- Take apart the USB Hub to see the chip and see if its protected or not
+- Before posting, apply to become a Shopee Affliate, then replace the links with Affliate Links

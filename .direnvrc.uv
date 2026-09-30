@@ -1,0 +1,16 @@
+layout_uv() {
+    export VIRTUAL_ENV="${PWD}/.venv"
+
+    # If the venv folder isn't there, make it!
+    if [[ ! -d "$VIRTUAL_ENV" ]]; then
+        log_status "No virtual environment exists. Executing \`uv venv\` to create one."
+        uv venv "$VIRTUAL_ENV"
+    fi
+
+    # Prepend the venv bin directory to your path so it actually activates
+    if [[ -d "${VIRTUAL_ENV}/bin" ]]; then
+        PATH_add "${VIRTUAL_ENV}/bin"
+    fi
+
+    export UV_ACTIVE=1
+}

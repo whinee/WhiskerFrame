@@ -1,0 +1,55 @@
+# rsync exclude list for deploying CYD Display Link to the Raspberry Pi.
+#
+# Use with:
+#   rsync -av --exclude-from=pi/deploy-exclude.txt \
+#       -e "ssh -i /home/lyra/.ssh/id_rsa" \
+#       ./ root@10.0.0.212:/opt/cyd-display-link/
+#
+# The Pi only needs: the whiskerframe/ runtime package, the pi/ provisioning
+# project, and scripts/ (device discovery, flash gate, env check). Everything
+# below is agent config, dev tooling, docs, firmware sources, tests, or local
+# build artifacts the Pi host does not run.
+
+# --- AI agent rules / configs (do NOT ship to the Pi) ---
+.agents/
+.claude/
+.clinerules/
+.codex/
+.cursor/
+.opencode/
+.windsurf/
+.sixth/
+.kiro/
+
+# --- VCS, history, caches, local envs ---
+.git/
+.history/
+.hypothesis/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# --- Editor / direnv / local tooling ---
+.envrc
+.direnvrc.uv
+poetry.toml
+
+# --- Dev-only tooling and heavy assets the Pi runtime never uses ---
+dev/
+docs/
+docs copy/
+3D Models/
+firmware/
+test/
+examples/
+mypy.ini
+.markdownlint.yaml
+
+# --- The CYD factory backup (keep local; do not push a large bin over rsync) ---
+cyd_factory_backup.bin

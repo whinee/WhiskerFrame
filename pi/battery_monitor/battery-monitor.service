@@ -1,0 +1,33 @@
+[Unit]
+# Cyberdeck UPS Module 3S battery monitor (INA219 over I2C).
+# Reads /dev/i2c-1 and publishes a power_supply mirror to /run/battery_monitor.
+Description=Cyberdeck UPS battery monitor (INA219)
+Documentation=file:///opt/cyd-display-link/pi/battery_monitor/README.md
+After=multi-user.target
+
+[Service]
+Type=simple
+# Run the daemon module through the uv-managed Pi venv interpreter so it uses the
+# same declared runtime as the rest of the Pi host (stdlib-only I2C path).
+ExecStart=/opt/cyd-display-link/pi/.venv/bin/python -m battery_monitor.daemon
+WorkingDirectory=/opt/cyd-display-link/pi
+Restart=on-failure
+RestartSec=5
+
+# --- Hardening (least privilege) -----------------------------------------
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/battery_monitor
+# The daemon only needs the one I2C bus character device; deny all others.
+DeviceAllow=/dev/i2c-1 rw
+DevicePolicy=closed
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

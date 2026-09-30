@@ -1,0 +1,11 @@
+app_name_proper: SnapID Backend
+app_name: whiskerframe
+app_id: xyz.863271.snapid-backend.beta
+site: "[PLACEHOLDER]snapid.klikasnap.com"
+copyright_holder: Copyright (c) 2025 Jeremy Vien G. Arriola <jeremyviengarriola@gmail.com>\nCopyright (c) 2025 Klik-A-Snap Photography Services Development Team <klikasnap@gmail.com>
+synopsis: Make IDs in a snap!
+description: Efficiently generate ID images from a database or thru manual input.
+internals:
+    magic_str: c0VjUmVUX2NPZEUgYnkgd2hpX25l
+defaults:
+    language: en

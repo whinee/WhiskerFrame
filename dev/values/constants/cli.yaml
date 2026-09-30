@@ -1,0 +1,8 @@
+group_command_params:
+  context_settings:
+    help_option_names:
+      - -h
+      - --help
+commands:
+  credits: {}
+  version: {}
