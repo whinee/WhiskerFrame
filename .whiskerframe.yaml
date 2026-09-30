@@ -1,0 +1,31 @@
+# Cyberdeck / whiskerframe project configuration (committed, non-secret).
+#
+# Hardware facts and component lists that must stay reproducible live here rather
+# than hard-coded in scripts. Loaded via scripts/config.py.
+
+# Components verified on the Pi host by scripts/pi_env_check.py (Req 6.2).
+components:
+  - python3
+  - pip
+  - pyserial
+
+# UPS Module 3S battery monitor (Texas Instruments INA219 over I2C).
+ups:
+  chip: INA219
+  i2c_bus: 1                 # /dev/i2c-1 (Pi GPIO 2/3, physical pins 3/5)
+  i2c_address: 0x41          # detected on this build (i2cdetect -y 1 -> 41)
+  cells_series: 3            # 3S pack (3x 18650)
+  voltage_full: 12.6         # volts at 100%
+  voltage_empty: 9.0         # volts at 0%
+  shunt_ohms: 0.1
+  low_battery_percent: 15    # daemon warning threshold
+  critical_percent: 5        # daemon critical/shutdown threshold
+  poll_interval_seconds: 10  # battery daemon poll cadence (seconds)
+  auto_shutdown: true        # power off cleanly at critical_percent (5%) to protect the pack
+  power_supply_name: cyberdeck_ups  # POWER_SUPPLY_NAME published to the kernel class
+
+# CYD display link serial device.
+cyd:
+  usb_id: "1a86:7523"        # CH340 USB-serial bridge
+  port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+  baud: 115200

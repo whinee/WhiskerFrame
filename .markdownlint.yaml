@@ -1,0 +1,38 @@
+# Reference:
+# - https://github.com/DavidAnson/markdownlint
+# - https://github.com/DavidAnson/markdownlint/blob/main/schema/.markdownlint.yaml
+
+# Default state for all rules
+default: true
+
+# MD007/ul-indent : Unordered list indentation : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md007.md
+MD007:
+  # Spaces for indent
+  indent: 4
+
+# MD013/line-length : Line length : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md013.md
+MD013: false
+
+# MD024/no-duplicate-heading : Multiple headings with the same content : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md024.md
+MD024: false
+
+# MD033/no-inline-html : Inline HTML : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md033.md
+MD033: false
+
+# MD034/no-bare-urls : Bare URL used : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md034.md
+MD034: false
+
+# MD036/no-emphasis-as-heading : Emphasis used instead of a heading : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md036.md
+MD036: false
+
+# MD041/first-line-heading/first-line-h1 : First line in a file should be a top-level heading : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md041.md
+MD041: false
+
+# MD045/no-alt-text : Images should have alternate text (alt text) : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md045.md
+MD045: false
+
+# MD051/link-fragments : Link fragments should be valid : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md051.md
+MD051: false
+
+# MD046/code-block-style : Code block style : https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md046.md
+MD046: false

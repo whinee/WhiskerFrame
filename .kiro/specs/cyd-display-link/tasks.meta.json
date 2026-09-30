@@ -1,0 +1,359 @@
+{
+  "pbtResults": {
+    "18.2 Write property test for backup validation": {
+      "status": "passed",
+      "lastRunTimestamp": 1790714820316
+    },
+    "18.4 Write property test for gate logic": {
+      "status": "passed",
+      "lastRunTimestamp": 1790714821197
+    }
+  },
+  "executionHistory": {
+    "1.1 Fix `pyproject.toml` packaging": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927501
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706940619
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707983335
+      }
+    ],
+    "2.1 Implement `RectangleCoordinates` ABC + `XYXY`, `XYWH`, `FourXY`, `XY`/`WH`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927530
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706942017
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707986715
+      }
+    ],
+    "3.1 Implement `Anchor` type, `validate_anchor()`, `resolve_anchor()`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927550
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706943416
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707987749
+      }
+    ],
+    "4.1 Implement static width/height metrics table + line/text sizing helpers": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927568
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706944862
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707988478
+      }
+    ],
+    "5.1 Implement pydantic `TextStyle`, `TextConfig`, `RectConfig`, `DrawText`, `DrawRect`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927585
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709132234
+      }
+    ],
+    "6.1 Implement frame constants, opcodes, `crc8`, `serialize()`/`frame()`, `decode()`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927602
+      }
+    ],
+    "7.1 Implement `CommandBuilder.draw_text()` / `draw_rect()` + multiline layout": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927621
+      }
+    ],
+    "8.1 Re-export `XYXY`, `XYWH`, `FourXY`, `Anchor`, `TextStyle`, `DrawText`,": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927637
+      }
+    ],
+    "9. Checkpoint - pure command path": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927784
+      }
+    ],
+    "10.1 Implement `test/text_anchors.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927882
+      }
+    ],
+    "10.2 Implement `test/text_anchors_multiline.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927910
+      }
+    ],
+    "10.3 Implement `test/text_anchors_inverted_multiline.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927934
+      }
+    ],
+    "11.1 Implement `examples/01_coordinates.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927958
+      }
+    ],
+    "11.2 Implement `examples/02_text.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706927987
+      }
+    ],
+    "11.3 Implement `examples/03_multiline_text.py`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928017
+      }
+    ],
+    "12.1 Add `test` and `examples` recipes to root `justfile`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928056
+      }
+    ],
+    "13.1 Implement Pillow `Preview_Renderer.render(commands) -> PIL.Image`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928089
+      }
+    ],
+    "14.1 Implement `SerialTransport.send(frame)` over pyserial": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928126
+      }
+    ],
+    "15.1 Implement `frame.h` decoder state machine + CRC8": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928159
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706946107
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707989233
+      }
+    ],
+    "15.3 Implement `render.h` `render_text()`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928185
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709134544
+      }
+    ],
+    "15.4 Implement `render.h` `render_rect()`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928218
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709135789
+      }
+    ],
+    "15.5 Implement `main.cpp` `setup()` / `loop()`": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928243
+      }
+    ],
+    "16.1 Implement device enumeration + baseline capture + diff/report logic (pure)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928285
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707995541
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709123537
+      }
+    ],
+    "16.3 [MANUAL] Operator run of Device_Discovery with CYD attached": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928378
+      }
+    ],
+    "17.1 Implement env-check reporting logic (pure) + SSH wrapper": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928444
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707996921
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709124928
+      }
+    ],
+    "17.3 [MANUAL] Operator run of Pi connectivity/env verification": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928475
+      }
+    ],
+    "18.1 Implement backup-validation function (pure)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928503
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707997859
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709126001
+      }
+    ],
+    "18.3 Implement flash-gate decision logic (pure)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928529
+      },
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790709133595
+      }
+    ],
+    "19.1 [MANUAL] Run `esptool.py read_flash 0x0 0x400000 backup.bin` on connected CYD": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928567
+      }
+    ],
+    "20.1 [MANUAL] Flash CYD_Firmware to the device": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928604
+      }
+    ],
+    "21. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790706928643
+      }
+    ],
+    "1. Packaging + project baseline": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707983634
+      }
+    ],
+    "2. Coordinate model (`whiskerframe/coordinates.py`)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707986839
+      }
+    ],
+    "3. Anchor primitives (`whiskerframe/anchors.py`)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707987861
+      }
+    ],
+    "4. Font metrics table (`whiskerframe/metrics.py`)": [
+      {
+        "executionId": "9eca4808-0f65-4cfd-9c3f-7c5fe759b054",
+        "chatSessionId": "sess_116492c9-b203-4942-b8f3-44b1e5358ae7",
+        "timestamp": 1790707988572
+      }
+    ]
+  }
+}

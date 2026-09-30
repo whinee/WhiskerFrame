@@ -1,0 +1,41 @@
+# Raspberry Pi host runtime for CYD Display Link.
+#
+# This is a small uv-managed project that declares the *runtime* the Pi Zero 2W
+# needs to drive the CYD: the whiskerframe command builder plus its pyserial
+# transport. It is intentionally separate from the root project so the Pi does
+# not receive the firmware sources, dev tooling, tests, or docs machinery.
+#
+# It is spec-driven: dependencies are declared here (not installed ad hoc), and
+# uv creates an isolated virtual environment with a managed Python, so the Pi's
+# externally-managed system Python (PEP 668) is never touched.
+#
+# Provision it with:  ./bootstrap.sh   (see that script / README.md)
+
+[project]
+name = "cyd-pi-host"
+version = "0.1.0"
+description = "Raspberry Pi host runtime that streams drawing commands to the CYD."
+readme = "README.md"
+# uv will fetch a managed CPython that satisfies this, independent of the Pi's
+# system Python version, so RPi OS shipping 3.11 is not a blocker.
+requires-python = ">=3.12"
+dependencies = [
+    "whiskerframe[serial]",
+    # Config loader (scripts/config.py) reads .whiskerframe.yaml on the Pi.
+    "pyyaml>=6",
+]
+
+[tool.uv.sources]
+# Install whiskerframe from the repository checkout that sits one level up.
+# When you sync the whole repo to the Pi, `pi/` sits beside `whiskerframe/`,
+# so this relative path resolves. Swap for a git/URL source if you deploy the
+# Pi package on its own.
+whiskerframe = { path = "..", editable = false }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# No package of its own; this project only pins the Pi's runtime dependencies.
+py-modules = []
