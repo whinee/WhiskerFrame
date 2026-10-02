@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from .battery import (
@@ -195,11 +196,41 @@ class PowerSupplyPublisher:
             uevent_path=self.uevent_path,
         )
         self._atomic_write(self.uevent_path, format_uevent(reading, self.name))
+        self._last_reading = reading
         status_doc = {
             "name": self.name,
             "voltage_v": round(reading.voltage, 4),
             "current_ma": round(reading.current, 3),
             "percent": reading.percent,
             "status": reading.status,
+            "updated_at": time.time(),
+            "fresh": True,
+        }
+        self._atomic_write(self.status_path, json.dumps(status_doc, indent=2) + "\n")
+
+    def mark_stale(self, reason: str) -> None:
+        r"""
+        Flag the published status as stale during an I2C read failure.
+
+        Rewrite ``status.json`` with ``fresh=False`` and the error ``reason`` so a
+        reader can tell the daemon is retrying rather than that the pack genuinely
+        froze. The last good electrical values are kept for context; the ``uevent``
+        mirror is left untouched (the kernel keeps the last known capacity).
+
+        Args:
+        - reason (`str`): Human-readable description of the read failure.
+
+        """
+        self.ensure_dir()
+        last = getattr(self, "_last_reading", None)
+        status_doc = {
+            "name": self.name,
+            "voltage_v": round(last.voltage, 4) if last else None,
+            "current_ma": round(last.current, 3) if last else None,
+            "percent": last.percent if last else None,
+            "status": last.status if last else "Unknown",
+            "updated_at": time.time(),
+            "fresh": False,
+            "stale_reason": reason,
         }
         self._atomic_write(self.status_path, json.dumps(status_doc, indent=2) + "\n")

@@ -20,6 +20,8 @@ Recommended order:
 2. Section B — Pi host runtime (uv provisioning)
 3. Section C — CYD discovery, backup, flash (irreversible steps flagged)
 4. Section D — UPS Module 3S wiring + I2C enable + battery daemon
+5. Section E — M5Stack CardKB keyboard (I2C-0)
+6. Section G — CYD terminal bridge (login shell on the CYD)
 
 Steps marked **IRREVERSIBLE** overwrite hardware state — read their safety notes.
 
@@ -260,6 +262,107 @@ status file / `power_supply` entry reports voltage, current, and percentage.
 
 ---
 
+## Section E — M5Stack CardKB keyboard (I2C-0)
+
+The CardKB is an I2C keypad on the Pi's **I2C-0** bus (GPIO 0/1, pins 27/28),
+separate from the UPS on I2C-1. See `docs/Schematics.md` for wiring.
+
+1. Enable I2C-0 (idempotent) and reboot:
+
+   ```sh
+   ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C '
+     CFG=/boot/firmware/config.txt; cp "$CFG" "$CFG.bak.$(date +%s)"
+     grep -q "^dtparam=i2c_vc=on" "$CFG" || echo "dtparam=i2c_vc=on" >> "$CFG"
+     grep -q "^dtoverlay=i2c0" "$CFG" || echo "dtoverlay=i2c0,pins_0_1" >> "$CFG"'
+   ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C "nohup reboot >/dev/null 2>&1 &"; sleep 45
+   ```
+
+2. Detect the CardKB (expect `5f` on bus 0):
+
+   ```sh
+   ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C "i2cdetect -y 0"
+   ```
+
+3. Read keys (requires the deployed Pi runtime). A pressed key returns its ASCII
+   byte; idle returns `0`:
+
+   ```sh
+   ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C "cd /opt/cyd-display-link/pi && .venv/bin/python -c \"from cardkb.reader import CardKB
+   with CardKB(bus=0, address=0x5f) as kb:
+       print('press keys (Ctrl-C to stop)')
+       for k in kb.keys():
+           print(k, repr(chr(k)))\""
+   ```
+
+   Expected: each key you press prints its byte + character.
+
+## Section G — CYD terminal bridge (login shell on the CYD)
+
+**Goal:** a real `bash -l` login shell rendered on the CYD, typed on the CardKB,
+gated by a boot splash + a system login (user select + masked password + PAM).
+This daemon ties together the CYD serial display (Section C), the CardKB
+(Section E), and PAM auth. It runs as a `Restart=always` systemd service.
+
+**Prerequisites:**
+
+- Section B done (Pi venv at `/opt/cyd-display-link/pi/.venv`).
+- Section C done (CYD firmware flashed with the Wave B draw ops; serial reachable).
+- Section E done (CardKB detected on `/dev/i2c-0` at `0x5f`).
+- The Pi runtime has `simplepam` (added to `pi/pyproject.toml`; re-run
+  `pi/bootstrap.sh` if the venv predates it).
+
+> **IMPORTANT — the terminal service owns the CYD serial EXCLUSIVELY.** While
+> `terminal.service` is running, nothing else can use the CYD serial port. Before
+> re-flashing the CYD (Section C.3) or running any other serial diagnostic, stop
+> it first:
+>
+> ```sh
+> ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C "systemctl stop terminal"
+> ```
+>
+> Re-start it (or re-run the installer) when done.
+
+1. **Generate the splash blob on the programmer** (NOT on the Pi — the Pi never
+   runs Pillow). From the repo root on your workstation:
+
+   ```sh
+   just splash
+   ```
+
+   Expected: `splash: <image> -> <...>.rgb565 (153600 bytes)`. This writes the
+   file at `terminal.splash.rgb565`; it is synced to the Pi by the normal deploy.
+   Idempotent: the same input always yields the same 153600-byte blob.
+
+2. **Deploy the repo** to the Pi as usual (so `pi/terminal/` and the `.rgb565`
+   blob land under `/opt/cyd-display-link`).
+
+3. **Install the service** (idempotent; run on the Pi, as root, from the terminal
+   directory):
+
+   ```sh
+   ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 -C \
+     "cd /opt/cyd-display-link/pi/terminal && chmod +x install.sh && ./install.sh"
+   ```
+
+   Expected: the unit installs, enables, and starts; `systemctl status terminal`
+   shows `active (running)`.
+
+4. **Verify on the CYD:** the splash shows briefly, then the login screen lists
+   the configured users (`root`, `lyra`). Use the CardKB arrows + Enter to pick a
+   user, type the password (echoed as `*`), and Enter. On success a `bash -l`
+   shell for that user renders on the CYD; typing echoes. Run `logout` (or exit
+   the shell) to return to the login screen.
+
+5. **Resize (optional):** press `Ctrl+]` (CardKB byte `0x1d`) in the shell to
+   cycle the font size through 1 → 2 → 3 (grids 53x30 / 26x15 / 17x10). The chord
+   is ignored on the login screen.
+
+Privilege note: `terminal.service` runs as **root** with `NoNewPrivileges=false`
+so the bridge can `su - <user>` into any configured account after a correct
+password. The **login gate is the security boundary** — nothing runs an
+unauthenticated shell, so physical access no longer yields a free root console.
+See `docs/api/unreleased/ai-decisions.md` for the full rationale.
+
 ## Quick reference
 
 | Step | What | Reversible? | Gate |
@@ -272,6 +375,9 @@ status file / `power_supply` entry reports voltage, current, and percentage.
 | D.1 | Wire UPS I2C to Pi I2C-1 (pins 3/5/6/9) | Yes | — |
 | D.2 | Enable I2C-1 (`dtparam=i2c_arm=on`) + reboot | Yes | — |
 | D.3 | Install battery-monitor daemon | Yes (systemd) | INA219 must be detected first |
+| E | Enable I2C-0 + detect CardKB (`0x5f`) | Yes | — |
+| G.1 | Generate splash blob (`just splash`, programmer-side) | Yes (idempotent) | — |
+| G.3 | Install terminal bridge daemon | Yes (systemd) | Sections C + E done; **stop `terminal` before any CYD serial use/flash** |
 
 Identifying facts for this build:
 

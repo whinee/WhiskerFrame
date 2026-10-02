@@ -80,12 +80,73 @@ static const uint8_t kTextFlagMultiline = 0x02;  // bit1
 // DRAW_RECT flag bits.
 static const uint8_t kRectFlagFilled = 0x01;  // bit0
 
+// Fixed (pre-text) header length of a DRAW_CELLS payload (host
+// protocol.py `_DRAW_CELLS_HEADER = "<HHHHBH"`):
+//   col(2) row(2) fg(2) bg(2) font_size(1) len(2) = 11 bytes.
+static const uint16_t kDrawCellsHeaderLen = 11;
+
+// Fixed length of a SCROLL payload (host `_SCROLL = "<bHHH"`):
+//   rows(1, signed) fill(2) top(2) bottom(2) = 7 bytes.
+static const uint16_t kScrollLen = 7;
+
+// Fixed (pre-pixel) header length of a DRAW_IMAGE payload (host
+// `_DRAW_IMAGE_HEADER = "<HHHH"`):
+//   x(2) y(2) w(2) h(2) = 8 bytes.
+static const uint16_t kDrawImageHeaderLen = 8;
+
+// Fixed-cell font geometry base (6x8 at size 1), matching
+// whiskerframe/metrics.py FONT_METRICS and the TFT_eSPI 6x8 built-in font that
+// setTextSize(N) scales linearly. cell_w = 6*N, cell_h = 8*N.
+static const int32_t kCellBaseW = 6;
+static const int32_t kCellBaseH = 8;
+
+// Scanline buffer bound for the SCROLL row-band blit (one row of pixels at the
+// 320-wide landscape panel). Bounded, stack-free (file-scope static) so SCROLL
+// does no dynamic allocation on the constrained ESP32. 320 covers the full
+// visible width at rotation 1.
+static const uint16_t kScrollMaxWidth = 320;
+
 // -- Little-endian payload readers ------------------------------------------
 
 // Read a little-endian uint16 from `p` at byte offset `off`.
 inline uint16_t read_u16le(const uint8_t* p, uint16_t off) {
   return static_cast<uint16_t>(p[off]) |
          (static_cast<uint16_t>(p[off + 1]) << 8);
+}
+
+// Read a signed int8 from `p` at byte offset `off`. Used for SCROLL's `rows`
+// field, which the host packs as struct "<b" (signed: +up, -down).
+inline int8_t read_i8(const uint8_t* p, uint16_t off) {
+  return static_cast<int8_t>(p[off]);
+}
+
+// -- Active cell height tracking (for SCROLL) -------------------------------
+//
+// SCROLL carries its row band in CELL units but has no font_size field, so the
+// firmware cannot know the pixel height of a cell from the SCROLL payload
+// alone. We track the cell height of the most recent DRAW_CELLS command in a
+// file-scope static and reuse it to convert SCROLL's cell-unit band to pixels.
+// This is self-contained: the host emits DRAW_CELLS at the active terminal
+// font before scrolling, so the tracked height matches the band the host
+// intends. Default is the size-1 cell height (8 px) until the first DRAW_CELLS.
+//
+// Trade-off (documented in ai-decisions.md): if a SCROLL ever arrives before
+// any DRAW_CELLS, it scrolls assuming an 8 px cell. In the terminal data flow
+// the splash/login paint cells first, so this is safe in practice.
+inline int32_t& active_cell_height() {
+  static int32_t cell_h = kCellBaseH;  // size-1 default (8 px)
+  return cell_h;
+}
+
+// Cell width/height in pixels for a font_size selector (0 treated as 1),
+// matching whiskerframe/metrics.py (cell_w = 6*N, cell_h = 8*N).
+inline int32_t cell_width_for(uint8_t font_size) {
+  const int32_t n = font_size == 0 ? 1 : static_cast<int32_t>(font_size);
+  return kCellBaseW * n;
+}
+inline int32_t cell_height_for(uint8_t font_size) {
+  const int32_t n = font_size == 0 ? 1 : static_cast<int32_t>(font_size);
+  return kCellBaseH * n;
 }
 
 // -- Anchor byte -> TFT_eSPI text datum -------------------------------------
@@ -267,6 +328,224 @@ inline void render_rect(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
   } else {
     tft.drawRect(x, y, w, h, color);
   }
+}
+
+// -- render_cells (DRAW_CELLS 0x03) -----------------------------------------
+//
+// Render a DRAW_CELLS payload on `tft`.
+//
+// Payload layout (little-endian, host protocol.py `_DRAW_CELLS_HEADER
+// = "<HHHHBH"`):
+//   col(2) row(2) fg(2) bg(2) font_size(1) len(2) then `len` glyph bytes
+//   (one char per cell, latin-1).
+//
+// Each cell occupies a fixed cell_w x cell_h box (cell_w = 6*font_size,
+// cell_h = 8*font_size) starting at pixel (col*cell_w, row*cell_h). The whole
+// run's background is painted first (one fillRect of len*cell_w x cell_h in
+// `bg`) so overwrites are clean, then the glyphs are drawn in `fg` at the
+// matching text size with a top-left datum. Cells that would fall outside the
+// visible display are skipped individually (clipped at the right/bottom edge) —
+// the on-screen prefix still draws. A malformed/short payload (shorter than the
+// header, or `len` overrunning the received bytes) is skipped entirely, matching
+// the render_text skip contract.
+//
+// Side effect: updates the module-level active cell height (see
+// active_cell_height) so a subsequent SCROLL can convert its cell-unit band to
+// pixels using this command's font size.
+inline void render_cells(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
+  if (payload == nullptr || len < kDrawCellsHeaderLen) {
+    return;  // malformed -> skip
+  }
+
+  const uint16_t col = read_u16le(payload, 0);
+  const uint16_t row = read_u16le(payload, 2);
+  const uint16_t fg = read_u16le(payload, 4);
+  const uint16_t bg = read_u16le(payload, 6);
+  const uint8_t font_size = payload[8];
+  const uint16_t run_len = read_u16le(payload, 9);
+
+  // Declared run length must not overrun the received payload.
+  if (static_cast<uint32_t>(kDrawCellsHeaderLen) + run_len > len) {
+    return;  // malformed -> skip
+  }
+
+  const int32_t cell_w = cell_width_for(font_size);
+  const int32_t cell_h = cell_height_for(font_size);
+
+  // Remember this font's cell height for a following SCROLL (see header note).
+  active_cell_height() = cell_h;
+
+  const uint8_t* glyphs = payload + kDrawCellsHeaderLen;
+  const int32_t base_x = static_cast<int32_t>(col) * cell_w;
+  const int32_t base_y = static_cast<int32_t>(row) * cell_h;
+
+  // Whole run off-screen vertically -> nothing to draw.
+  if (base_y < 0 || base_y >= tft.height()) {
+    return;
+  }
+
+  // Paint only the on-screen portion of the run background in one fillRect, then
+  // draw glyphs cell-by-cell, skipping any that start past the right edge.
+  const int32_t screen_w = tft.width();
+  if (base_x >= screen_w) {
+    return;  // run starts off the right edge
+  }
+  const int32_t run_px = static_cast<int32_t>(run_len) * cell_w;
+  int32_t bg_w = run_px;
+  if (base_x + bg_w > screen_w) {
+    bg_w = screen_w - base_x;  // clip background to the visible width
+  }
+  if (bg_w > 0) {
+    tft.fillRect(base_x, base_y, bg_w, cell_h, bg);
+  }
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(fg, bg);
+  tft.setTextSize(font_size == 0 ? 1 : font_size);
+
+  for (uint16_t i = 0; i < run_len; ++i) {
+    const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
+    if (cx >= screen_w) {
+      break;  // remaining cells are off the right edge
+    }
+    char ch[2];
+    ch[0] = static_cast<char>(glyphs[i]);
+    ch[1] = '\0';
+    tft.drawString(ch, cx, base_y);
+  }
+}
+
+// -- render_scroll (SCROLL 0x04) --------------------------------------------
+//
+// Render a SCROLL payload on `tft`.
+//
+// Payload layout (little-endian, host `_SCROLL = "<bHHH"`):
+//   rows(1, SIGNED int8: +up, -down) fill(2) top(2) bottom(2)
+// top/bottom are the inclusive row band in CELL units.
+//
+// The firmware converts the cell-unit band to pixels using the cell height of
+// the most recent DRAW_CELLS (active_cell_height; default 8 px) — SCROLL itself
+// carries no font_size. The pixel band [top*cell_h, (bottom+1)*cell_h) is
+// shifted up (rows>0) or down (rows<0) by abs(rows)*cell_h pixels using a
+// scanline readRect/pushRect row-band copy, and the vacated rows are filled with
+// `fill`. The band is clamped to the visible display; a zero shift, an invalid
+// band, or a shift that clears the whole band is handled as a plain fill (or a
+// no-op). No dynamic allocation: one file-scope scanline buffer bounds the copy.
+inline void render_scroll(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
+  if (payload == nullptr || len < kScrollLen) {
+    return;  // malformed -> skip
+  }
+
+  const int8_t rows = read_i8(payload, 0);
+  const uint16_t fill = read_u16le(payload, 1);
+  const uint16_t top = read_u16le(payload, 3);
+  const uint16_t bottom = read_u16le(payload, 5);
+
+  if (bottom < top) {
+    return;  // invalid band -> no-op
+  }
+
+  const int32_t cell_h = active_cell_height();
+  if (cell_h <= 0) {
+    return;  // defensive; cell height is always positive
+  }
+
+  // Pixel band [band_top, band_bottom) clamped to the screen.
+  const int32_t screen_w = tft.width();
+  const int32_t screen_h = tft.height();
+  int32_t band_top = static_cast<int32_t>(top) * cell_h;
+  int32_t band_bottom = (static_cast<int32_t>(bottom) + 1) * cell_h;
+  if (band_top < 0) {
+    band_top = 0;
+  }
+  if (band_bottom > screen_h) {
+    band_bottom = screen_h;
+  }
+  const int32_t band_h = band_bottom - band_top;
+  if (band_h <= 0 || screen_w <= 0) {
+    return;  // band entirely off-screen -> no-op
+  }
+
+  // Clip the copy width to the scanline buffer bound.
+  int32_t copy_w = screen_w;
+  if (copy_w > kScrollMaxWidth) {
+    copy_w = kScrollMaxWidth;
+  }
+
+  // Shift distance in pixels (unsigned magnitude).
+  const int32_t shift =
+      (rows >= 0 ? static_cast<int32_t>(rows) : -static_cast<int32_t>(rows)) *
+      cell_h;
+
+  if (rows == 0 || shift >= band_h) {
+    // No net scroll, or the shift clears the whole band: just fill it.
+    tft.fillRect(0, band_top, copy_w, band_h, fill);
+    return;
+  }
+
+  // One scanline of pixels, reused per row (bounded, no heap).
+  static uint16_t line_buf[kScrollMaxWidth];
+
+  if (rows > 0) {
+    // Scroll UP: move each source row to `shift` pixels above it. Copy from the
+    // top of the band downward so sources are read before being overwritten.
+    for (int32_t y = band_top + shift; y < band_bottom; ++y) {
+      tft.readRect(0, y, copy_w, 1, line_buf);
+      tft.pushRect(0, y - shift, copy_w, 1, line_buf);
+    }
+    // Fill the vacated rows at the bottom of the band.
+    tft.fillRect(0, band_bottom - shift, copy_w, shift, fill);
+  } else {
+    // Scroll DOWN: move each source row `shift` pixels below it. Copy from the
+    // bottom of the band upward so sources are read before being overwritten.
+    for (int32_t y = band_bottom - 1 - shift; y >= band_top; --y) {
+      tft.readRect(0, y, copy_w, 1, line_buf);
+      tft.pushRect(0, y + shift, copy_w, 1, line_buf);
+    }
+    // Fill the vacated rows at the top of the band.
+    tft.fillRect(0, band_top, copy_w, shift, fill);
+  }
+}
+
+// -- render_image (DRAW_IMAGE 0x05) -----------------------------------------
+//
+// Render a DRAW_IMAGE payload on `tft`.
+//
+// Payload layout (little-endian, host `_DRAW_IMAGE_HEADER = "<HHHH"`):
+//   x(2) y(2) w(2) h(2) then w*h*2 raw RGB565 bytes.
+//
+// The pixel bytes are blitted directly from the payload pointer with
+// tft.pushImage(x, y, w, h, (const uint16_t*)data) — no copy, no allocation.
+// The RGB565 bytes are interpreted as native-endian uint16 (the order TFT_eSPI
+// pushImage expects); the splash converter on the host MUST emit
+// little-endian/native-endian RGB565 to match (documented in ai-decisions.md).
+// The payload length is validated to equal header(8) + w*h*2; a short or
+// malformed payload is skipped entirely. TFT_eSPI clips any off-screen pixels
+// natively, so no bounds skip is applied here (parallels render_rect).
+inline void render_image(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
+  if (payload == nullptr || len < kDrawImageHeaderLen) {
+    return;  // malformed -> skip
+  }
+
+  const uint16_t x = read_u16le(payload, 0);
+  const uint16_t y = read_u16le(payload, 2);
+  const uint16_t w = read_u16le(payload, 4);
+  const uint16_t h = read_u16le(payload, 6);
+
+  // Required pixel-data length for a w*h RGB565 block (2 bytes/pixel).
+  const uint32_t need =
+      static_cast<uint32_t>(kDrawImageHeaderLen) +
+      static_cast<uint32_t>(w) * static_cast<uint32_t>(h) * 2u;
+  if (need > len) {
+    return;  // short payload -> skip (don't blit past the buffer)
+  }
+  if (w == 0 || h == 0) {
+    return;  // nothing to draw
+  }
+
+  const uint16_t* pixels =
+      reinterpret_cast<const uint16_t*>(payload + kDrawImageHeaderLen);
+  tft.pushImage(x, y, w, h, pixels);
 }
 
 }  // namespace cyd_display_link

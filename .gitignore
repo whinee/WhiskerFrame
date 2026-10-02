@@ -14,8 +14,10 @@ personal/
 docs/.obsidian/plugins
 docs/.trash/
 docs/.DS_Store
+tmp/
 
 # User-defined Ignored Files
+.whiskerframe.yaml
 .env.docker-compose
 docker-compose.yml
 tr.yml
@@ -470,3 +472,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/node,linux,macos,python,freecad,windows,platformio,visualstudiocode
+
+# Cyberdeck: live config is per-user/gitignored; example is the committed template
+!.whiskerframe.example.yaml

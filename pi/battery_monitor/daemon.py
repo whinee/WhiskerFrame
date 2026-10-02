@@ -41,7 +41,7 @@ __all__ = [
 
 # Backoff bounds for transient I2C errors (seconds).
 _BACKOFF_START_S: float = 1.0
-_BACKOFF_MAX_S: float = 30.0
+_BACKOFF_MAX_S: float = 5.0
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -265,6 +265,7 @@ def _poll_once(
     - `INA219Error`: If a bus read fails (handled by the caller's backoff).
 
     """
+    device.calibrate()  # re-arm config/calibration each poll (survives chip drift)
     voltage = device.bus_voltage_v()
     current = device.current_ma()
     reading = read_to_reading(voltage, current, config.pack)
@@ -276,6 +277,30 @@ def _poll_once(
         f"{reading.voltage:.2f}V {reading.current:.1f}mA",
     )
     _check_thresholds(reading.percent, config)
+
+
+def _reopen(device: INA219) -> None:
+    r"""
+    Re-open and re-calibrate the INA219 after an I2C error.
+
+    Close and re-open the device, then re-write the calibration/config so a chip
+    that lost its configuration on a power blip, or a transient bus glitch,
+    recovers on the next poll. Any failure here is swallowed; the next poll's
+    own error handling will retry.
+
+    Args:
+    - device (`INA219`): The INA219 driver to recycle.
+
+    Returns:
+    `None`: Best-effort recovery; errors are intentionally ignored.
+
+    """
+    try:
+        device.close()
+        device.open()
+        device.calibrate()
+    except INA219Error:
+        pass  # next poll will log + back off again
 
 
 def run(config: DaemonConfig, iterations: int | None = None) -> int:
@@ -313,8 +338,10 @@ def run(config: DaemonConfig, iterations: int | None = None) -> int:
             except INA219Error as err:
                 log("ERROR", f"I2C read failed, retrying in {backoff:.0f}s: {err}")
                 tracepoint("daemon.backoff", seconds=backoff)
+                publisher.mark_stale(str(err))
                 time.sleep(backoff)
                 backoff = min(_BACKOFF_MAX_S, backoff * 2)
+                _reopen(device)
                 continue
             if iterations is None or completed < iterations:
                 time.sleep(config.poll_interval_s)

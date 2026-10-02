@@ -21,8 +21,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "whiskerframe[serial]",
-    # Config loader (scripts/config.py) reads .whiskerframe.yaml on the Pi.
+    # Config loader (scripts/config.py) reads .whiskerframe.yaml + .env on the Pi.
     "pyyaml>=6",
+    "python-dotenv>=1",
+    # PAM authentication for the CYD terminal login gate (pi/terminal/login.py).
+    "simplepam>=0.1.5",
 ]
 
 [tool.uv.sources]
