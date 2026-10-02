@@ -28,16 +28,24 @@ usable on the serial command path (Req 1.1, 1.5).
 from __future__ import annotations
 
 import struct
+from typing import TYPE_CHECKING, Any
 
 from whiskerframe.anchors import Anchor, resolve_anchor
 from whiskerframe.models import DrawRect, DrawText
+from whiskerframe.terminal import DrawCells, DrawImage, Scroll
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
     "CRC8_CHECK",
     "OPCODE_CLEAR",
+    "OPCODE_DRAW_CELLS",
+    "OPCODE_DRAW_IMAGE",
     "OPCODE_DRAW_RECT",
     "OPCODE_DRAW_TEXT",
     "OPCODE_FLUSH",
+    "OPCODE_SCROLL",
     "SOF",
     "crc8",
     "decode",
@@ -53,6 +61,15 @@ OPCODE_DRAW_TEXT: int = 0x01
 
 OPCODE_DRAW_RECT: int = 0x02
 """Opcode selecting the ``DRAW_RECT`` command."""
+
+OPCODE_DRAW_CELLS: int = 0x03
+"""Opcode selecting the ``DRAW_CELLS`` command (a run of fixed-cell glyphs)."""
+
+OPCODE_SCROLL: int = 0x04
+"""Opcode selecting the ``SCROLL`` command (shift a row band up or down)."""
+
+OPCODE_DRAW_IMAGE: int = 0x05
+"""Opcode selecting the ``DRAW_IMAGE`` command (a raw RGB565 pixel block)."""
 
 OPCODE_CLEAR: int = 0x10
 """Reserved opcode clearing the display to a fill color (not yet serialized)."""
@@ -82,6 +99,16 @@ _VERTICAL_KEY: dict[int, str] = {value: key for key, value in _VERTICAL_NIBBLE.i
 _DRAW_TEXT_HEADER = struct.Struct("<HHBHHBBHH")
 # DRAW_RECT: x, y, w, h, color (u16), flags (u8).
 _DRAW_RECT = struct.Struct("<HHHHHB")
+# DRAW_CELLS header: col, row, fg, bg (u16), font_size (u8), len (u16).
+_DRAW_CELLS_HEADER = struct.Struct("<HHHHBH")
+# SCROLL: rows (signed int8), fill, top, bottom (u16).
+_SCROLL = struct.Struct("<bHHH")
+# DRAW_IMAGE header: x, y, w, h (u16). Raw RGB565 bytes follow.
+_DRAW_IMAGE_HEADER = struct.Struct("<HHHH")
+
+# Cell glyphs are one byte per cell; latin-1 maps the full 0..255 byte range
+# losslessly, matching the CP437/ASCII single-byte-per-cell wire layout.
+_CELL_ENCODING: str = "latin-1"
 
 
 def crc8(data: bytes) -> int:
@@ -238,7 +265,83 @@ def _encode_draw_rect(command: DrawRect) -> bytes:
     )
 
 
-def serialize(command: DrawText | DrawRect) -> bytes:
+def _encode_draw_cells(command: DrawCells) -> bytes:
+    """
+    Encode a ``DrawCells`` command into its ``DRAW_CELLS`` payload bytes.
+
+    Pack the starting cell coordinates, RGB565 colors, font size, and run length
+    header, followed by the run text encoded one byte per cell (latin-1), all
+    little-endian per the design's ``DRAW_CELLS`` payload layout.
+
+    Args:
+    - command (`DrawCells`): Resolved cell-run command to encode.
+
+    Returns:
+    `bytes`: The ``DRAW_CELLS`` payload (excluding opcode and framing).
+
+    """
+    text_bytes = command.text.encode(_CELL_ENCODING)
+    header = _DRAW_CELLS_HEADER.pack(
+        command.col,
+        command.row,
+        command.fg,
+        command.bg,
+        command.font_size,
+        len(text_bytes),
+    )
+    return header + text_bytes
+
+
+def _encode_scroll(command: Scroll) -> bytes:
+    """
+    Encode a ``Scroll`` command into its ``SCROLL`` payload bytes.
+
+    Pack the signed ``int8`` row count, the RGB565 fill color, and the inclusive
+    top/bottom row bounds, all little-endian per the design's ``SCROLL`` payload
+    layout.
+
+    Args:
+    - command (`Scroll`): Resolved scroll command to encode.
+
+    Returns:
+    `bytes`: The ``SCROLL`` payload (excluding opcode and framing).
+
+    """
+    return _SCROLL.pack(command.rows, command.fill, command.top, command.bottom)
+
+
+def _encode_draw_image(command: DrawImage) -> bytes:
+    """
+    Encode a ``DrawImage`` command into its ``DRAW_IMAGE`` payload bytes.
+
+    Pack the top-left coordinates and block dimensions, then append the raw
+    RGB565 pixel bytes, all little-endian per the design's ``DRAW_IMAGE`` payload
+    layout.
+
+    Args:
+    - command (`DrawImage`): Resolved image-block command to encode.
+
+    Returns:
+    `bytes`: The ``DRAW_IMAGE`` payload (excluding opcode and framing).
+
+    """
+    header = _DRAW_IMAGE_HEADER.pack(command.x, command.y, command.w, command.h)
+    return header + command.data
+
+
+_ENCODERS: tuple[tuple[type, int, Callable[[Any], bytes]], ...] = (
+    (DrawText, OPCODE_DRAW_TEXT, _encode_draw_text),
+    (DrawRect, OPCODE_DRAW_RECT, _encode_draw_rect),
+    (DrawCells, OPCODE_DRAW_CELLS, _encode_draw_cells),
+    (Scroll, OPCODE_SCROLL, _encode_scroll),
+    (DrawImage, OPCODE_DRAW_IMAGE, _encode_draw_image),
+)
+"""Command type -> (opcode, payload encoder) dispatch for :func:`serialize`."""
+
+
+def serialize(
+    command: DrawText | DrawRect | DrawCells | Scroll | DrawImage,
+) -> bytes:
     """
     Serialize a resolved drawing command into complete framed bytes.
 
@@ -248,19 +351,19 @@ def serialize(command: DrawText | DrawRect) -> bytes:
     framebuffer or full-display bitmap (Req 1.5).
 
     Args:
-    - command (`DrawText | DrawRect`): Resolved command to serialize.
+    - command (`DrawText | DrawRect | DrawCells | Scroll | DrawImage`): Resolved
+      command to serialize.
 
     Raises:
-    - `TypeError`: If ``command`` is neither a `DrawText` nor a `DrawRect`.
+    - `TypeError`: If ``command`` is not a recognized command type.
 
     Returns:
     `bytes`: The complete framed byte sequence.
 
     """
-    if isinstance(command, DrawText):
-        return frame(OPCODE_DRAW_TEXT, _encode_draw_text(command))
-    if isinstance(command, DrawRect):
-        return frame(OPCODE_DRAW_RECT, _encode_draw_rect(command))
+    for command_type, opcode, encoder in _ENCODERS:
+        if isinstance(command, command_type):
+            return frame(opcode, encoder(command))
     msg = f"Cannot serialize object of type {type(command).__name__!r}."
     raise TypeError(msg)
 
@@ -347,6 +450,97 @@ def _decode_draw_rect(payload: bytes) -> DrawRect:
     )
 
 
+def _decode_draw_cells(payload: bytes) -> DrawCells:
+    """
+    Decode a ``DRAW_CELLS`` payload into a ``DrawCells`` command.
+
+    Unpack the fixed-length header and decode the trailing run text (one byte per
+    cell, latin-1), inverting :func:`_encode_draw_cells`.
+
+    Args:
+    - payload (`bytes`): ``DRAW_CELLS`` payload bytes (excluding opcode).
+
+    Raises:
+    - `ValueError`: If the payload is truncated or the text length is inconsistent.
+
+    Returns:
+    `DrawCells`: The reconstructed cell-run command.
+
+    """
+    header_size = _DRAW_CELLS_HEADER.size
+    if len(payload) < header_size:
+        msg = f"DRAW_CELLS payload too short: {len(payload)} < {header_size} bytes."
+        raise ValueError(msg)
+    col, row, fg, bg, font_size, text_len = _DRAW_CELLS_HEADER.unpack(
+        payload[:header_size],
+    )
+    text_bytes = payload[header_size:]
+    if len(text_bytes) != text_len:
+        msg = (
+            f"DRAW_CELLS text length mismatch: header {text_len} "
+            f"!= {len(text_bytes)} bytes."
+        )
+        raise ValueError(msg)
+    return DrawCells(
+        col=col,
+        row=row,
+        fg=fg,
+        bg=bg,
+        font_size=font_size,
+        text=text_bytes.decode(_CELL_ENCODING),
+    )
+
+
+def _decode_scroll(payload: bytes) -> Scroll:
+    """
+    Decode a ``SCROLL`` payload into a ``Scroll`` command.
+
+    Unpack the fixed-length payload (signed ``int8`` row count, RGB565 fill, and
+    the row bounds), inverting :func:`_encode_scroll`.
+
+    Args:
+    - payload (`bytes`): ``SCROLL`` payload bytes (excluding opcode).
+
+    Raises:
+    - `ValueError`: If the payload length does not match the ``SCROLL`` layout.
+
+    Returns:
+    `Scroll`: The reconstructed scroll command.
+
+    """
+    if len(payload) != _SCROLL.size:
+        msg = f"SCROLL payload length mismatch: {len(payload)} != {_SCROLL.size} bytes."
+        raise ValueError(msg)
+    rows, fill, top, bottom = _SCROLL.unpack(payload)
+    return Scroll(rows=rows, fill=fill, top=top, bottom=bottom)
+
+
+def _decode_draw_image(payload: bytes) -> DrawImage:
+    """
+    Decode a ``DRAW_IMAGE`` payload into a ``DrawImage`` command.
+
+    Unpack the fixed-length header and take the trailing raw RGB565 pixel bytes,
+    inverting :func:`_encode_draw_image`. The model validates that the data
+    length equals ``w * h * 2``.
+
+    Args:
+    - payload (`bytes`): ``DRAW_IMAGE`` payload bytes (excluding opcode).
+
+    Raises:
+    - `ValueError`: If the payload is truncated or the data length is inconsistent.
+
+    Returns:
+    `DrawImage`: The reconstructed image-block command.
+
+    """
+    header_size = _DRAW_IMAGE_HEADER.size
+    if len(payload) < header_size:
+        msg = f"DRAW_IMAGE payload too short: {len(payload)} < {header_size} bytes."
+        raise ValueError(msg)
+    x, y, w, h = _DRAW_IMAGE_HEADER.unpack(payload[:header_size])
+    return DrawImage(x=x, y=y, w=w, h=h, data=payload[header_size:])
+
+
 _FRAME_OVERHEAD = 4
 """Non-body frame bytes: SOF (1) + LEN (2) + CRC8 (1)."""
 
@@ -389,14 +583,24 @@ def _unframe(frame_bytes: bytes) -> bytes:
     return body
 
 
-def decode(frame_bytes: bytes) -> DrawText | DrawRect:
+_Command = DrawText | DrawRect | DrawCells | Scroll | DrawImage
+_DECODERS: dict[int, Callable[[bytes], _Command]] = {
+    OPCODE_DRAW_TEXT: _decode_draw_text,
+    OPCODE_DRAW_RECT: _decode_draw_rect,
+    OPCODE_DRAW_CELLS: _decode_draw_cells,
+    OPCODE_SCROLL: _decode_scroll,
+    OPCODE_DRAW_IMAGE: _decode_draw_image,
+}
+"""Opcode -> payload decoder dispatch table (keeps :func:`decode` flat)."""
+
+
+def decode(frame_bytes: bytes) -> DrawText | DrawRect | DrawCells | Scroll | DrawImage:
     """
     Decode a complete framed byte sequence back into a drawing command.
 
     Validate the frame via :func:`_unframe`, then dispatch on the opcode to
-    reconstruct the original :class:`DrawText` or :class:`DrawRect`. This is the
-    inverse of :func:`serialize` and supports the serialization round-trip
-    property.
+    reconstruct the original command. This is the inverse of :func:`serialize`
+    and supports the serialization round-trip property.
 
     Args:
     - frame_bytes (`bytes`): Complete ``[SOF][LEN][OPCODE][PAYLOAD][CRC8]`` frame.
@@ -405,15 +609,15 @@ def decode(frame_bytes: bytes) -> DrawText | DrawRect:
     - `ValueError`: If the frame fails validation or the opcode is unknown.
 
     Returns:
-    `DrawText | DrawRect`: The reconstructed command.
+    `DrawText | DrawRect | DrawCells | Scroll | DrawImage`: The reconstructed
+    command.
 
     """
     body = _unframe(frame_bytes)
     opcode = body[0]
     payload = body[1:]
-    if opcode == OPCODE_DRAW_TEXT:
-        return _decode_draw_text(payload)
-    if opcode == OPCODE_DRAW_RECT:
-        return _decode_draw_rect(payload)
-    msg = f"Unknown opcode: {opcode:#04x}."
-    raise ValueError(msg)
+    decoder = _DECODERS.get(opcode)
+    if decoder is None:
+        msg = f"Unknown opcode: {opcode:#04x}."
+        raise ValueError(msg)
+    return decoder(payload)

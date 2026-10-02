@@ -13,7 +13,7 @@
 |  Label   | 5V  | GND | 3V3 | SCL |
 |   Pin    |  2  |  4  |  6  |  8  |
 
-## UPS module — I2C details
+### UPS module - I2C details
 
 - Monitor chip: Texas Instruments **INA219** (voltage / current / power).
 - I2C bus: **I2C-1** (Pi GPIO 2 = SDA / GPIO 3 = SCL, physical pins 3 / 5).
@@ -21,3 +21,12 @@
 - Battery pack: 3S (3x 18650 in series), nominal range ~9.0 V (empty) to 12.6 V (full).
 - Enable the bus: uncomment `dtparam=i2c_arm=on` in `/boot/firmware/config.txt`,
   add `i2c-dev` to `/etc/modules`, reboot; verify with `i2cdetect -y 1` (address 41).
+
+## CardKB
+
+Note: From Top to Bottom
+
+| Function |  A  |  B  |  C  |  D  |
+| :------: | :-: | :-: | :-: | :-: |
+|   Pin    |  1  |  2  |  3  |  4  |
+|  Label   | GND | 5V  | SDA | SCL |

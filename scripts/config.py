@@ -66,13 +66,20 @@ def load_yaml_config(path: Path | None = None) -> dict[str, Any]:
     keeping the config optional for a minimal checkout.
 
     Args:
-    - path (`Path | None`, optional): Explicit config path. Defaults to ``.whiskerframe.yaml`` at the project root.
+    - path (`Path | None`, optional): Explicit config path. Defaults to ``.whiskerframe.yaml`` (falling back to ``.whiskerframe.example.yaml``) at the project root.
 
     Returns:
     `dict[str, Any]`: The parsed configuration mapping (empty when absent).
 
     """
-    config_path = path if path is not None else PROJECT_ROOT / ".whiskerframe.yaml"
+    if path is not None:
+        config_path = path
+    else:
+        # Prefer the user's live, gitignored config; fall back to the committed
+        # example so a fresh clone (before the user copies it) still works.
+        live = PROJECT_ROOT / ".whiskerframe.yaml"
+        example = PROJECT_ROOT / ".whiskerframe.example.yaml"
+        config_path = live if live.is_file() else example
     if not config_path.is_file():
         tracepoint("config.yaml", path=config_path, keys=0)
         return {}

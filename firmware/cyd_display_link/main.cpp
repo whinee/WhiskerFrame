@@ -5,7 +5,8 @@
 // length-prefixed drawing-command protocol produced by the host
 // `whiskerframe.protocol` module, decodes complete frames with
 // `cyd_display_link::FrameDecoder` (frame.h), and renders the DRAW_TEXT /
-// DRAW_RECT commands with the helpers in render.h.
+// DRAW_RECT / DRAW_CELLS / SCROLL / DRAW_IMAGE commands with the helpers in
+// render.h.
 //
 // Boot (setup):   initialize the display and open the serial link (Req 2.2).
 // Steady state (loop): drain the serial RX buffer one byte at a time through
@@ -59,9 +60,18 @@ static void dispatch(cyd_display_link::FrameDecoder& dec) {
     case cyd_display_link::kOpcodeDrawRect:
       cyd_display_link::render_rect(tft, dec.payload(), dec.payload_len());
       break;
+    case cyd_display_link::kOpcodeDrawCells:
+      cyd_display_link::render_cells(tft, dec.payload(), dec.payload_len());
+      break;
+    case cyd_display_link::kOpcodeScroll:
+      cyd_display_link::render_scroll(tft, dec.payload(), dec.payload_len());
+      break;
+    case cyd_display_link::kOpcodeDrawImage:
+      cyd_display_link::render_image(tft, dec.payload(), dec.payload_len());
+      break;
     // kOpcodeClear / kOpcodeFlush are reserved (see design "Opcodes"); the
-    // frame layer accepts them, but the required render surface is DRAW_TEXT +
-    // DRAW_RECT (Req 1.3), so any other known opcode is intentionally a no-op.
+    // frame layer accepts them, but they are outside the current render surface,
+    // so any other known opcode is intentionally a no-op.
     default:
       break;
   }
@@ -73,6 +83,11 @@ static void dispatch(cyd_display_link::FrameDecoder& dec) {
 void setup() {
   tft.init();
   tft.setRotation(kDisplayRotation);
+  // This CYD panel reports colours inverted (red<->cyan, white<->black, etc.)
+  // under the default TFT_eSPI setup, so flip the panel inversion. Empirically
+  // determined on-device: pure RGB565 primaries showed as their complements
+  // until invertDisplay(true) was applied.
+  tft.invertDisplay(true);
   tft.fillScreen(TFT_BLACK);
   Serial.begin(kSerialBaud);
 }

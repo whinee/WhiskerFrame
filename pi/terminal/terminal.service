@@ -1,0 +1,36 @@
+[Unit]
+# Cyberdeck CYD terminal bridge: renders a real bash login shell on the CYD,
+# typed on the CardKB, gated by a splash + system login. Owns the CYD serial
+# link exclusively while running.
+Description=Cyberdeck CYD terminal bridge (login shell on the CYD)
+Documentation=file:///opt/cyd-display-link/pi/terminal/terminal.service
+After=multi-user.target
+
+[Service]
+Type=simple
+# Run the daemon module through the uv-managed Pi venv interpreter so it uses the
+# same declared runtime as the rest of the Pi host.
+ExecStart=/opt/cyd-display-link/pi/.venv/bin/python -m terminal.daemon
+WorkingDirectory=/opt/cyd-display-link/pi
+Restart=always
+RestartSec=3
+
+# --- Privilege rationale -------------------------------------------------
+# This service deliberately runs as root and does NOT drop privileges at the
+# systemd level. The login gate (user selection + masked password + PAM auth)
+# is the security boundary, NOT the service user: the bridge must be able to
+# `su - <user>` into ANY configured account (including root) with a correct
+# password, which requires starting as root so PAM/su can set the target
+# uid/gid/env/PAM session. Physical access no longer yields an unauthenticated
+# shell because nothing runs until a password authenticates. Because the service
+# must su to other users, NoNewPrivileges MUST stay disabled.
+NoNewPrivileges=false
+
+# The bridge needs the CYD USB-serial device and the CardKB I2C bus; grant only
+# those two devices. /dev/ttyUSB0 is the CH340 bridge (adjust if the stable
+# by-id path resolves elsewhere); /dev/i2c-0 is the CardKB bus.
+DeviceAllow=/dev/ttyUSB0 rw
+DeviceAllow=/dev/i2c-0 rw
+
+[Install]
+WantedBy=multi-user.target

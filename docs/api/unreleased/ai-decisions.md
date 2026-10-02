@@ -557,3 +557,223 @@ reads, systemd bring-up) is deferred to the Pi deployment; the orchestrator runs
   layer.
 - The daemon is safe to run continuously on the UPS: read-only I2C, no default
   poweroff, and no crash on bus glitches.
+
+
+## Config: per-user live file + committed example (`.whiskerframe.yaml`)
+
+### Decision
+
+`.whiskerframe.yaml` is treated like `.env`: the live file is **gitignored**
+(per-user), and `.whiskerframe.example.yaml` is the **committed** template. The
+dev's live config equals the example, but gitignoring the live file means a user
+who clones the repo keeps their own config across updates — a repo pull cannot
+clobber local hardware settings. `scripts/config.py` loads the live file and
+falls back to the example when it is absent, so a fresh clone works before the
+user copies it.
+
+## CYD terminal: a11y palette, login gate, splash
+
+### Decision
+
+1. **Accessibility.** The piiiiink palette was audited for WCAG contrast on the
+   blurple terminal background `#191a28`. The main colours already passed, but the
+   ANSI terminal set (`ansiBlack`/`ansiBlue`/`ansiRed`) and the alpha-faded
+   `editor.foreground` failed; all were corrected to >= 4.5:1 while keeping the
+   piiiiink hue family. The corrected set is the terminal theme (RGB565 in config)
+   and a saved VS Code theme (`assets/themes/piiiiink-a11y.json`).
+2. **Login gate (supersedes the earlier boot-to-root note).** The CYD terminal no
+   longer boots straight to root. A splash image shows during boot, then a login
+   screen lets the user pick a configured user and enter a password echoed only as
+   asterisks; authentication is real system auth (PAM/`su`), not a bespoke
+   comparison. `logout` (or shell EOF) returns to the login screen, never an
+   unauthenticated root prompt — which is also the safe idle state for the
+   field-robustness rule.
+3. **Splash** is a config-pointed image, converted host-side to RGB565 and blitted
+   via a new `DRAW_IMAGE` op.
+
+## Firmware (Wave B): DRAW_CELLS / SCROLL / DRAW_IMAGE in `render.h`
+
+### Context
+
+The `cyd-terminal` feature adds three incremental draw ops over the existing
+`DRAW_TEXT`/`DRAW_RECT` surface so a keystroke never triggers a full-screen
+redraw at 115200 baud: `DRAW_CELLS` (`0x03`, a run of fixed-cell glyphs),
+`SCROLL` (`0x04`, shift a row band), and `DRAW_IMAGE` (`0x05`, a raw RGB565
+block for the boot splash). The firmware decode MUST match the host
+`whiskerframe.protocol` wire layouts byte-for-byte: `_DRAW_CELLS_HEADER =
+"<HHHHBH"`, `_SCROLL = "<bHHH"`, `_DRAW_IMAGE_HEADER = "<HHHH"`.
+
+### Decision
+
+1. **Fixed-cell geometry from font_size, pinned to `metrics.py`.** `render_cells`
+   computes `cell_w = 6*font_size`, `cell_h = 8*font_size` (font_size 0 treated
+   as 1), matching `whiskerframe/metrics.py` `FONT_METRICS` and the TFT_eSPI 6x8
+   built-in font that `setTextSize(N)` scales linearly. It paints the whole run
+   background in one `fillRect` first (clean overwrites), then draws each glyph in
+   `fg` at a top-left datum. Cells past the right edge are skipped per-cell and a
+   run that starts off the right/bottom edge is skipped; a short/malformed payload
+   (header missing or `len` overrunning the received bytes) is skipped entirely,
+   matching the `render_text` skip contract rather than clipping mid-glyph.
+
+2. **SCROLL cell-height tracking (the key self-containment decision).** `SCROLL`
+   carries its `top`/`bottom` band in CELL units but has NO `font_size` field, so
+   the firmware cannot derive a cell's pixel height from the SCROLL payload alone.
+   Rather than reinterpret the band as pixels (which would contradict the design's
+   cell-unit contract), the firmware tracks the cell height of the most recent
+   `DRAW_CELLS` in a file-scope static (`active_cell_height()`, default 8 px =
+   size 1) and uses it to convert SCROLL's cell band to the pixel band
+   `[top*cell_h, (bottom+1)*cell_h)`. This is self-contained and correct for the
+   terminal data flow: the host paints cells at the active font before scrolling,
+   so the tracked height always matches the band the host intends.
+   Trade-off: a `SCROLL` arriving before any `DRAW_CELLS` scrolls assuming an 8 px
+   cell. In the actual flow the splash/login/terminal paint cells first, so this
+   never happens in practice; it degrades to a size-1 scroll rather than failing.
+
+3. **Pixel-band scroll via bounded scanline `readRect`/`pushRect`.** The band is
+   clamped to the visible display, then shifted up (`rows > 0`) or down
+   (`rows < 0`) by `abs(rows)*cell_h` pixels, copying one scanline at a time into a
+   single file-scope 320-wide `uint16_t` buffer (`kScrollMaxWidth`) and filling the
+   vacated rows with `fill`. Copy direction is chosen so sources are read before
+   being overwritten (top-down for up-scroll, bottom-up for down-scroll). A zero
+   shift, an invalid band (`bottom < top`), or a shift that clears the whole band
+   degrades to a plain `fillRect` (or a no-op) — robust, never a partial/garbage
+   blit. No heap: the one scanline buffer is file-scope `static`, bounded to the
+   panel width.
+
+4. **DRAW_IMAGE endianness: native/little-endian RGB565, blit in place.** The
+   `data` bytes are interpreted as native-endian `uint16` and blitted straight
+   from the payload pointer with `tft.pushImage(x, y, w, h, (const uint16_t*)data)`
+   — no copy, no allocation. TFT_eSPI `pushImage` expects pixels in the panel's
+   native `uint16` order, and `whiskerframe.terminal.DrawImage.data` is raw
+   caller-supplied bytes, so the host-side splash converter MUST emit
+   little-endian/native-endian RGB565 to match. (If a future converter emits
+   big-endian, it must byte-swap or set the TFT_eSPI swap flag; the chosen contract
+   is native/little-endian to avoid a per-pixel swap on-device.) The payload length
+   is validated to equal `header(8) + w*h*2` and a short payload is skipped, so a
+   truncated frame never blits past the receive buffer. Off-screen pixels rely on
+   TFT_eSPI's native clipping (parallels `render_rect`), so no bounds-skip is
+   applied.
+
+5. **No dynamic allocation on the constrained ESP32.** `DRAW_CELLS` draws one
+   glyph at a time from a 2-byte stack buffer; `DRAW_IMAGE` blits in place; `SCROLL`
+   uses the single bounded file-scope scanline buffer. This keeps RAM use flat
+   (measured 7.5% of 320 KB after the build) regardless of payload size.
+
+### Verification
+
+Compiled clean with the real toolchain in this environment via
+`uvx --from platformio pio run` (esp32dev, TFT_eSPI 2.5.43): `[SUCCESS]`, only
+the unrelated `TOUCH_CS pin not defined` TFT_eSPI warning. RAM 7.5% / Flash
+22.9%. The byte offsets were cross-checked against `whiskerframe/protocol.py`'s
+`struct` formats (`<HHHHBH` / `<bHHH` / `<HHHH`). On-device visual verification
+(real cell runs, scroll bands, splash blit) is deferred to the gated [MANUAL]
+flash + bring-up; this agent did NOT flash.
+
+### Consequences
+
+- The `render.h` byte offsets are pinned to the host serializer; a change to any
+  of the three `struct` formats in `protocol.py` must move in lockstep here.
+- `active_cell_height()` couples `render_scroll` to the most recent
+  `render_cells`; if the terminal ever interleaves two font sizes within one
+  scroll region, the host must re-send cells rather than relying on a stale
+  tracked height. Documented so a future caller does not assume per-SCROLL font
+  independence.
+- The DRAW_IMAGE native-endian contract is now pinned: the splash `.rgb565`
+  converter is the single place that must honor it.
+
+## CYD terminal Wave C: `su`-based shell, root service, resize chord, splash chunking
+
+### Context
+
+Wave C turns the pure host core (Wave A) and firmware draw ops (Wave B) into a
+live Pi daemon: a boot splash, a login gate, and a real `bash -l` login shell
+rendered on the CYD and typed on the CardKB. Several design decisions have
+security and robustness consequences and are recorded here.
+
+### Decision: start the shell via `su - <user>` on a forked PTY
+
+The bridge authenticates the user via PAM (`simplepam`) at the login gate, then
+starts the session with `pty.fork()` and `execvp("su", ["su", "-", user])` in the
+child.
+
+- **Rationale.** `su - <user>` is a PAM-aware system binary that establishes the
+  full target context — uid/gid, supplementary groups, `$HOME`, `$SHELL`, a login
+  environment, and a PAM session — which a bare `os.setuid` + `exec` would not
+  reproduce correctly. Delegating to `su` keeps the privilege transition in a
+  well-audited system component rather than hand-rolling credential handling in
+  the daemon. The user is already authenticated before `su` runs; `su` re-enters
+  PAM but the design treats the gate's PAM check as the authoritative boundary.
+- **Consequence.** The daemon process must run as root so `su` can switch to any
+  configured account (including unprivileged users and root itself). This is why
+  the service runs as root and `NoNewPrivileges` is disabled (see below).
+- **Alternatives rejected.** `os.setuid`/`setgid` + manual env setup is fragile
+  (easy to leak the parent environment or miss group membership and PAM session
+  setup). A restricted/custom shell was rejected per the design: the deck wants a
+  genuine console, and the daemon is a transport, not a sandbox.
+
+### Decision: run the systemd service as root with `NoNewPrivileges=false`
+
+Unlike `battery-monitor.service` (which drops to a hardened least-privilege
+profile), `terminal.service` runs as root and explicitly sets
+`NoNewPrivileges=false`.
+
+- **Rationale.** The service's whole purpose is to `su` into other users on
+  demand after a password check. `su` relies on being able to gain privileges
+  (setuid), which `NoNewPrivileges=yes` forbids; and switching to an arbitrary
+  configured user requires starting as root. The **security boundary is the login
+  gate**, not the service user: nothing runs an unauthenticated shell, so physical
+  access to the deck no longer yields a free root console (a change from the
+  earlier "boots to root" posture). Password input is masked and never logged.
+- **Consequence / least privilege retained where possible.** The unit still scopes
+  device access with `DeviceAllow` to only the CYD serial and `/dev/i2c-0` (the
+  CardKB bus); it does not grant blanket device access. The broader hardening
+  directives used by the battery daemon (`ProtectSystem=strict`, `ProtectHome`,
+  `PrivateTmp`, namespace/realtime restrictions) are intentionally omitted because
+  they would break `su`/PAM and the login shells' expectations of real home
+  directories and a normal filesystem view.
+
+### Decision: resize chord is `Ctrl+]` (`0x1d`), ignored during login
+
+Runtime font-size resize cycles sizes 1/2/3 when the CardKB sends `0x1d`
+(`Ctrl+]`, ASCII GS).
+
+- **Rationale.** The chord must be a byte that is essentially never wanted inside
+  an interactive shell, so intercepting it costs no normal functionality.
+  `Ctrl+]` is the classic telnet escape, not a shell line-editing key (unlike
+  `Ctrl+A`/`Ctrl+E`/`Ctrl+R`/`Tab`, which readline uses heavily), making it a safe
+  sacrifice. On the resize it recomputes `TerminalGeometry`, rebuilds the grid and
+  emulator, pushes the new window size to the PTY via `TIOCSWINSZ` (so programs
+  reflow), and forces a full repaint.
+- **Login handling.** The chord is ignored on the login screen so it can never
+  disturb user selection or password entry; resize is a shell-only affordance.
+
+### Decision: splash sent as 2-row `DRAW_IMAGE` chunks
+
+`show_splash` streams the 153600-byte RGB565 blob as 120 `DRAW_IMAGE` frames of
+two panel rows each (320x2 px -> 1280-byte payload).
+
+- **Rationale.** A whole-frame `DRAW_IMAGE` payload (153600 bytes) vastly exceeds
+  the firmware's ~2 KB frame cap. Two rows per chunk yields a 1280-byte payload,
+  comfortably under the cap while keeping the frame count modest (120). The blob
+  is pre-converted on the programmer (Pillow) and little-endian RGB565 to match
+  the firmware pixel contract, so the Pi never runs an imaging library at boot —
+  it only reads bytes and frames them.
+- **Robustness.** A missing, empty, or row-misaligned blob is skipped silently
+  (the login screen is the safe idle state), and a serial write error aborts the
+  splash without raising, so the splash is always safe on the boot path.
+
+### Decision: incremental rendering via `grid.diff`, no explicit `SCROLL` emission
+
+The bridge renders each frame by diffing the new grid against the previous
+snapshot and sending the changed `DRAW_CELLS` runs; it does not try to detect a
+line scroll and emit a dedicated `SCROLL` op.
+
+- **Rationale.** Reliably inferring "this frame is the previous frame shifted up
+  by one row" from a pure cell diff is error-prone (any content change on the
+  scrolled rows defeats it), and a wrong `SCROLL` corrupts the display. The
+  grid's `scroll_up` shifts cells in the model, so `diff` already emits exactly
+  the cells that changed — correct by construction. This trades some serial
+  bandwidth on a full-screen scroll for guaranteed correctness and simplicity,
+  consistent with field-robustness (a simpler, never-wedging path beats a richer
+  one that can mis-scroll). The firmware `SCROLL` op remains available for a
+  future optimization but is not required for correctness.

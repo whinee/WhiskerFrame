@@ -429,6 +429,71 @@ Idempotent; safe to re-run. From the workstation, after syncing `pi/`:
 $PI "cd /opt/cyd-display-link/pi && ./bootstrap.sh"
 ```
 
+## CYD terminal daemon
+
+The terminal bridge (`pi/terminal/`, service `terminal.service`) renders a
+`bash -l` login shell on the CYD. Logs go to journald; tracepoints use the
+`terminal.*` namespace and gate on `WHISKERFRAME_DEBUG`.
+
+> **Stop the service to free the serial port.** `terminal.service` holds the CYD
+> serial EXCLUSIVELY. Any other serial use (re-flash, a `whiskerframe` send, a
+> serial monitor) will fail with the port busy until you stop it:
+>
+> ```sh
+> $PI "systemctl stop terminal"
+> ```
+>
+> Re-start with `$PI "systemctl start terminal"` when done.
+
+### Follow the daemon log
+
+```sh
+$PI "journalctl -u terminal -f"
+```
+
+Expected lines (plain): `INFO: terminal bridge started (serial ..., cardkb ...)`,
+then per session `INFO:` activity. Errors (serial reopen, auth-adapter missing)
+print as `ERROR:`.
+
+### Enable terminal tracepoints
+
+Add `Environment=WHISKERFRAME_DEBUG=1` to the unit's `[Service]` section (via a
+drop-in `systemctl edit terminal`), then restart and follow the log. You will see
+greppable `[TP] terminal.* ...` lines:
+
+| Tracepoint | When |
+| ---------- | ---- |
+| `terminal.config` | config resolved at startup |
+| `terminal.splash` | splash shown / skipped / write error |
+| `terminal.login` | login screen shown |
+| `terminal.auth` | an auth attempt (`user=`, `success=`; the password is NEVER logged) |
+| `terminal.shell_start` | a shell spawned for a user |
+| `terminal.logout` | a shell session ended (back to login) |
+| `terminal.keyframe` | a periodic full-repaint keyframe fired |
+| `terminal.serial_reopen` | serial opened / write error / reopen |
+| `terminal.resize` | the resize chord cycled the font size |
+
+```sh
+$PI "journalctl -u terminal | grep '\[TP\] terminal'"
+```
+
+Note: `terminal.auth` logs only the username and the boolean result — the
+plaintext password is never passed to a tracepoint and never appears in the
+journal or on the screen (it is only ever shown masked).
+
+### Import-check the daemon on the Pi (no display needed)
+
+```sh
+$PI "cd /opt/cyd-display-link/pi && .venv/bin/python -c \"
+from terminal.daemon import load_bridge_config
+from terminal.bridge import TerminalBridge, RESIZE_CHORD
+c = load_bridge_config()
+TerminalBridge(c)
+print('config ok:', c.serial_port, 'resize chord:', hex(RESIZE_CHORD))\""
+```
+
+Expected: `config ok: /dev/serial/by-id/... resize chord: 0x1d`.
+
 ## whiskerframe command path
 
 Build and serialize a command with tracepoints on, then round-trip decode it to

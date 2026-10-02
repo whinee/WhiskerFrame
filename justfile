@@ -53,6 +53,11 @@ examples:
 version:
     @ echo {{app_version}}
 
+# Convert the configured boot-splash image to a 320x240 RGB565 blob (programmer-side).
+[unix]
+splash:
+    uv run python scripts/convert_splash.py
+
 # Generate documentation
 [unix]
 docs:
