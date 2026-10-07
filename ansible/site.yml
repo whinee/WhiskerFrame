@@ -6,7 +6,7 @@
 # deps deterministic and RAM overhead low on the Pi Zero 2W.
 #
 # Destructive storage steps (TSK-02a SSD reformat) are DELIBERATELY NOT here.
-# They stay human-gated per spec §2.4 / DEC-W7. No role below formats, mounts,
+# They stay human-gated per spec docs/specifications/storage-mount.md (§2.4) / DEC-W7. No role below formats, mounts,
 # or wipes anything.
 - name: Cyberdeck host configuration
   hosts: cyberdeck

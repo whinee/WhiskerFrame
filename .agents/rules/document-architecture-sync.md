@@ -17,7 +17,7 @@ contract change) without the three doc edits in the same change.
    The clinical technical rationale: problem statement, root cause, the decision,
    rejected alternatives, and residual risk/tradeoffs. Append-only, ordered,
    `DEC-*` entries. This is where reasoning lives.
-2. **`docs/specifications/README.md` — WHAT IS (the contract).**
+2. **`docs/specifications/ (architecture.md, contracts/, tasks.md)` — WHAT IS (the contract).**
    The active system contract: current interfaces, wire rules, subsystem
    contracts, and the task/roadmap registry. State the system as it is *now*;
    correct any stale description rather than leaving an outdated one.

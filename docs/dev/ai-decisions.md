@@ -3,7 +3,7 @@
 This document captures the **rationale** behind technical, architectural, and design
 decisions. It records *why* a choice was made, the alternatives considered, and the
 tradeoffs accepted — not *what* the current contract is (see
-`docs/specifications/README.md`) nor *when* a change landed (see
+`docs/specifications/ architecture`) nor *when* a change landed (see
 `docs/dev/changelog.md`). Entries are append-only and ordered chronologically.
 
 Each decision is logged clinically: problem statement, root cause, decision,
@@ -136,7 +136,7 @@ and (c) execute a destructive SSD reformat against `/dev/sda2` marked "APPROVED"
 **Decision.**
 - **Supervisor loop codified** in `.agents/skills/orchestrator.md`: ground-facts-
   before-acting, typed DAG task contracts to workers, a verification gate, the
-  §3.2 circuit breakers, and the Documentation Triad update discipline.
+  circuit breakers (docs/specifications/orchestration.md §3.2), and the Documentation Triad update discipline.
 - **Ansible added as a dev-host layer** under `ansible/` (operator-approved):
   playbooks run from the dev host targeting the Pi over SSH. Inventory/vars read
   infra params (`PI_HOST`/`PI_USER`/`DEFAULT_KEY_PATH`/`DEFAULT_VENV_PATH`) via
@@ -146,7 +146,7 @@ and (c) execute a destructive SSD reformat against `/dev/sda2` marked "APPROVED"
   pending go-ahead. Ansible is NOT added to `pi/pyproject.toml` — it is a dev-host
   tool.
 - **The destructive reformat was NOT executed.** The brief's "APPROVED" label did
-  not override the standing human-gate (DEC-W7 / §2.4), and the asserted device
+  not override the standing human-gate (DEC-W7 / docs/specifications/storage-mount.md (§2.4)), and the asserted device
   node `/dev/sda2` does not exist on the dev host — the Pi device path was never
   confirmed. TSK-02a is marked `HELD` pending operator resolution.
 
