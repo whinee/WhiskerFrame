@@ -580,3 +580,14 @@ Noted. Escaped local  from the post-push checklist.
 
 ### Answer (Agent)
 * File formatted according to spec parameters. Waiting for answers under the newly added C-01 and C-02 `> A:` blocks.
+
+## Q: 2026-10-07 - Contradictions Resolved
+### Question/Action (Operator)
+* Interview mode: Read the resolutions for C-01 and C-02 in `docs/dev/spec-interview/contradictions.md`. Move entries to RESOLVED.
+* Author outcome REQ and DEC entries.
+
+### Answer (Agent)
+**1. Contradictions Processed:**
+- **C-01 (Artwork terms vs Open Source)**: Resolved. Artist granted non-commercial exception explicitly. Drafted `REQ-LIC-01` to authorize public distribution inside the repository.
+- **C-02 (OTG Power/Data Constraints)**: Resolved. Confirmed that Gadget mode requires pulling the OTG port out of Host mode, completely separating the SSD/LTE hub (even if the hub is powered). Accepted option (c) (GPIO UART recovery debugging), keeping the layout consistent with DEC-W15.
+- Both entries moved to `## Resolved` in `contradictions.md`, index updated.
