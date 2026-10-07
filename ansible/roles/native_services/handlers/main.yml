@@ -1,0 +1,13 @@
+---
+# Handlers for the native_services role.
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: reload systemd
+
+- name: restart filebrowser
+  ansible.builtin.systemd:
+    name: filebrowser
+    state: restarted
+  listen: restart filebrowser

@@ -1,0 +1,65 @@
+---
+# Defaults for the memory_safety role.
+#
+# Layered memory protection for the 416MB Pi Zero 2W: zram as the fast,
+# high-priority compressed swap, a modest SSD swapfile as a low-priority
+# spillover backstop, a low swappiness so the kernel prefers reclaim over swap,
+# and earlyoom so the OOM killer fires before the box thrashes into a
+# load-average death spiral (the direct lesson from the shelved container stack).
+#
+# NEVER put swap on the SD card — swap writes would shred it. The swapfile lives
+# on the BTRFS SSD (DEC-W12 reformat ext4->btrfs). ssd_mount_point is provided by
+# group_vars/cyberdeck.yml (from .whiskerframe.yaml); fallback below.
+#
+# BTRFS swapfile hard rules (why this role is btrfs-specific):
+#   - A swapfile MUST sit on a subvolume that is nodatacow, uncompressed, and
+#     NEVER snapshotted. We use the dedicated @swap subvolume for exactly this.
+#   - The @data subvolume (mounted at ssd_mount_point with compress=zstd) is the
+#     wrong home — compression + CoW on a swapfile makes the kernel refuse or
+#     corrupts it. @swap is mounted separately with plain noatime, no compress.
+#   - `btrfs filesystem mkswapfile` (btrfs-progs >= 6.1) sets nodatacow and the
+#     correct preallocation automatically; we belt-and-suspenders the dir too.
+
+ssd_mount_point: /mnt/250GB-SSD
+
+# --- BTRFS @swap subvolume (home of the SSD swapfile) ---------------------
+# The whole-disk btrfs SSD carries two subvolumes: @data (mounted at
+# ssd_mount_point with compress=zstd,noatime by the storage layer) and @swap.
+# The swapfile MUST live on @swap, mounted on its own path with NO compression
+# and NO CoW so the kernel will accept it.
+swap_subvol: "@swap"
+swap_subvol_mount: /swap
+# ssd_device_uuid also comes from group_vars/cyberdeck.yml; fallback for offline
+# syntax checks / standalone runs.
+ssd_device_uuid: "98bb87d2-7128-470e-91d5-9e117df2ab1a"
+
+# --- SSD swapfile (low-priority backstop) ---------------------------------
+swapfile_path: "{{ swap_subvol_mount }}/swapfile"
+swapfile_size_mb: 512
+# Low priority: the kernel fills higher-priority zram first and only spills to
+# this SSD-backed file under real pressure.
+swapfile_priority: 10
+
+# --- zram (high-priority compressed RAM swap) -----------------------------
+# zram-tools (Debian) manages a compressed swap device in RAM. Higher priority
+# than the SSD swapfile so it is used first.
+zram_percent: 50          # fraction of RAM to allocate to the (compressed) zram device
+zram_priority: 100        # above swapfile_priority -> used first
+zram_algorithm: zstd      # good ratio, cheap on arm
+
+# --- Kernel VM tuning -----------------------------------------------------
+# Low swappiness: prefer reclaiming page cache over swapping anonymous pages.
+# ~10-20 is the field-tuned band for a RAM-starved box with a slow swap backstop.
+vm_swappiness: 15
+# Reclaim inode/dentry caches a touch more aggressively to free RAM.
+vm_vfs_cache_pressure: 60
+
+# --- earlyoom (kill before thrash) ----------------------------------------
+# Trigger a targeted kill while there is still a little headroom, instead of
+# letting the kernel OOM killer act only after the system has already wedged.
+earlyoom_mem_percent: 8   # act when available memory drops below this %
+earlyoom_swap_percent: 8  # ...and when free swap drops below this %
+# Prefer to sacrifice heavy/non-critical processes; protect ssh/systemd/the
+# terminal bridge so the deck stays reachable and the display keeps working.
+earlyoom_prefer_regex: "^(python|node|git|docker|dockerd|containerd)$"
+earlyoom_avoid_regex: "^(systemd|sshd|bash|login|.*terminal.*|battery.*)$"

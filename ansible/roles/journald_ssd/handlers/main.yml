@@ -1,0 +1,19 @@
+---
+# Handlers for journald_ssd (TSK-03).
+
+- name: restart systemd-journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+  listen: restart systemd-journald
+
+- name: flush journal to persistent store
+  ansible.builtin.command: journalctl --flush
+  changed_when: false
+  listen: restart systemd-journald
+
+- name: restart log2ram
+  ansible.builtin.systemd:
+    name: log2ram
+    state: restarted
+  listen: restart log2ram

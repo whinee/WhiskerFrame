@@ -1,0 +1,13 @@
+[Unit]
+Description=Arm lockout rollback — fire {{ lockout_rollback_minutes }}min after the network switch
+
+[Timer]
+# One-shot deadline relative to when the timer is (re)started by the role at the
+# moment of the disruptive switch. If the connectivity sentinel is not created
+# within this window, network-rollback restores the previous network manager.
+OnActiveSec={{ lockout_rollback_minutes }}min
+# Not Persistent: a reboot during the window is itself a recovery path (NM may
+# still be enabled until the switch is confirmed), so we do not re-arm on boot.
+
+[Install]
+WantedBy=timers.target

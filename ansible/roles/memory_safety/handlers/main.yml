@@ -1,0 +1,14 @@
+---
+# Handlers for the memory_safety role.
+
+- name: restart zramswap
+  ansible.builtin.systemd:
+    name: zramswap
+    state: restarted
+  listen: restart zramswap
+
+- name: restart earlyoom
+  ansible.builtin.systemd:
+    name: earlyoom
+    state: restarted
+  listen: restart earlyoom

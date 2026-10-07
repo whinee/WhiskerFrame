@@ -1,0 +1,8 @@
+[Unit]
+Description=Lockout rollback — restore NetworkManager if connectivity not confirmed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/network-rollback
+MemoryMax=32M
+TimeoutStartSec=120

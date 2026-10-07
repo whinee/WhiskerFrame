@@ -1,0 +1,263 @@
+---
+# Native self-hosted services (NO Docker): git bare repos over SSH, Syncthing,
+# NetBird, File Browser — each with a systemd MemoryMax= ceiling. State lives on
+# the ext4 SSD to spare the SD card.
+#
+# INVARIANT: every long-running unit gets a MemoryMax so no service can thrash
+# the 416MB Pi (the DEC-W10 lesson). Secrets (NetBird setup key) are never logged.
+
+- name: Assert the SSD is mounted (service state must live on the SSD, not the SD card)
+  ansible.builtin.assert:
+    that:
+      - ssd_mount_point in (ansible_mounts | map(attribute='mount') | list)
+    fail_msg: >-
+      SSD not mounted at {{ ssd_mount_point }} — refusing to place service state
+      on the SD card. Bring up the storage mount first.
+    success_msg: "SSD confirmed at {{ ssd_mount_point }}."
+
+# ==========================================================================
+# Git — plain bare repositories served over SSH (no web forge)
+# ==========================================================================
+- name: Set up git-over-SSH (bare repositories)
+  when: git_enabled
+  tags: [git]
+  block:
+    - name: Ensure git is installed
+      ansible.builtin.apt:
+        name: git
+        state: present
+        update_cache: true
+
+    - name: Create the dedicated git service account (git-shell login shell)
+      ansible.builtin.user:
+        name: "{{ git_user }}"
+        home: "{{ git_home }}"
+        shell: /usr/bin/git-shell          # restricts the account to git ops only
+        system: true
+        create_home: true
+
+    - name: Create the bare-repo root
+      ansible.builtin.file:
+        path: "{{ git_repos_dir }}"
+        state: directory
+        owner: "{{ git_user }}"
+        group: "{{ git_user }}"
+        mode: "0750"
+
+    - name: Install the git account's authorized_keys
+      ansible.posix.authorized_key:
+        user: "{{ git_user }}"
+        key: "{{ item }}"
+        state: present
+        exclusive: false
+      loop: "{{ git_authorized_keys }}"
+      when: git_authorized_keys | length > 0
+
+    - name: Initialize the requested bare repositories
+      ansible.builtin.command: "git init --bare {{ git_repos_dir }}/{{ item }}.git"
+      args:
+        creates: "{{ git_repos_dir }}/{{ item }}.git/HEAD"
+      become: true
+      become_user: "{{ git_user }}"
+      loop: "{{ git_initial_repos }}"
+
+# ==========================================================================
+# Syncthing — file sync (packaged binary + per-user systemd unit)
+# ==========================================================================
+- name: Set up Syncthing
+  when: syncthing_enabled
+  tags: [syncthing]
+  block:
+    - name: Ensure apt keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Add the Syncthing apt signing key
+      ansible.builtin.get_url:
+        url: https://syncthing.net/release-key.gpg
+        dest: /etc/apt/keyrings/syncthing.gpg
+        mode: "0644"
+
+    - name: Add the Syncthing apt repository (stable)
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/syncthing.gpg] https://apt.syncthing.net/ syncthing stable"
+        filename: syncthing
+        state: present
+        update_cache: true
+
+    - name: Install Syncthing
+      ansible.builtin.apt:
+        name: syncthing
+        state: present
+        update_cache: true
+
+    - name: Ensure the Syncthing data directory exists
+      ansible.builtin.file:
+        path: "{{ syncthing_data_dir }}"
+        state: directory
+        owner: "{{ syncthing_user }}"
+        group: "{{ syncthing_user }}"
+        mode: "0750"
+
+    - name: Ensure the syncthing drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/syncthing@{{ syncthing_user }}.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Install a MemoryMax drop-in for syncthing@{{ syncthing_user }}
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/syncthing@{{ syncthing_user }}.service.d/memory.conf
+        content: |
+          [Service]
+          MemoryMax={{ syncthing_mem_max }}
+          Environment=STGUIADDRESS={{ syncthing_gui_address }}
+        mode: "0644"
+      notify: reload systemd
+
+    - name: Enable and start syncthing for the service user
+      ansible.builtin.systemd:
+        name: "syncthing@{{ syncthing_user }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+# ==========================================================================
+# NetBird — WireGuard-based remote access overlay (official binary)
+# ==========================================================================
+- name: Set up NetBird
+  when: netbird_enabled
+  tags: [netbird]
+  block:
+    - name: Add the NetBird apt signing key
+      ansible.builtin.get_url:
+        url: https://pkgs.netbird.io/debian/public.key
+        dest: /etc/apt/keyrings/netbird.gpg
+        mode: "0644"
+
+    - name: Add the NetBird apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/netbird.gpg] https://pkgs.netbird.io/debian stable main"
+        filename: netbird
+        state: present
+        update_cache: true
+
+    - name: Install the NetBird client
+      ansible.builtin.apt:
+        name: netbird
+        state: present
+        update_cache: true
+
+    - name: Ensure the netbird drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/netbird.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Install a MemoryMax drop-in for netbird
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/netbird.service.d/memory.conf
+        content: |
+          [Service]
+          MemoryMax={{ netbird_mem_max }}
+        mode: "0644"
+      notify: reload systemd
+
+    - name: Enable the NetBird service
+      ansible.builtin.systemd:
+        name: netbird
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # Unattended enrollment only when a setup key is provided. The key goes
+    # through a root-only file (--setup-key-file), never argv, so it cannot
+    # leak via the process list or task output. The file is removed after.
+    - name: Enroll this host into the NetBird overlay (setup key provided)
+      when: netbird_setup_key | length > 0
+      block:
+        - name: Run netbird up via ENV variable (avoids argv)
+        ansible.builtin.command: >
+          netbird up
+          {% if netbird_management_url | length > 0 %}--management-url {{ netbird_management_url }}{% endif %}
+        environment:
+          NB_SETUP_KEY: "{{ netbird_setup_key }}"
+        register: netbird_up
+        changed_when: "'Connected' in (netbird_up.stdout | default(''))"
+        failed_when:
+          - netbird_up.rc != 0
+          - "'already' not in (netbird_up.stderr | default('') | lower)\"
+
+# ==========================================================================
+# File Browser — web file manager (NATIVE binary, NOT the Docker image)
+# ==========================================================================
+- name: Set up File Browser (native binary)
+  when: filebrowser_enabled
+  tags: [filebrowser]
+  block:
+    - name: Map architecture to the File Browser release asset name
+      ansible.builtin.set_fact:
+        filebrowser_arch: >-
+          {{ {'aarch64': 'linux-arm64', 'armv7l': 'linux-armv7',
+              'x86_64': 'linux-amd64'}[ansible_architecture] }}
+
+    - name: Check the installed File Browser version
+      ansible.builtin.command: "{{ filebrowser_bin }} version"
+      register: fb_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Download the pinned File Browser release tarball
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/filebrowser/filebrowser/releases/download/{{ filebrowser_version }}/{{ filebrowser_arch }}-filebrowser.tar.gz
+        dest: "/tmp/filebrowser-{{ filebrowser_version }}.tar.gz"
+        mode: "0644"
+      when: filebrowser_version | regex_replace('^v', '') not in (fb_installed.stdout | default(''))
+
+    - name: Unpack the File Browser binary into place
+      ansible.builtin.unarchive:
+        src: "/tmp/filebrowser-{{ filebrowser_version }}.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        include: [filebrowser]
+        mode: "0755"
+        owner: root
+        group: root
+      when: filebrowser_version | regex_replace('^v', '') not in (fb_installed.stdout | default(''))
+      notify: restart filebrowser
+
+    - name: Remove the downloaded tarball
+      ansible.builtin.file:
+        path: "/tmp/filebrowser-{{ filebrowser_version }}.tar.gz"
+        state: absent
+
+    - name: Ensure the File Browser config/db directory exists
+      ansible.builtin.file:
+        path: "{{ filebrowser_config_dir }}"
+        state: directory
+        owner: "{{ filebrowser_user }}"
+        group: "{{ filebrowser_user }}"
+        mode: "0750"
+        recurse: true    # fix a db/config file left root-owned by an earlier run
+
+    - name: Install the File Browser systemd unit (with MemoryMax)
+      ansible.builtin.template:
+        src: filebrowser.service.j2
+        dest: /etc/systemd/system/filebrowser.service
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart filebrowser
+
+    - name: Enable and start File Browser
+      ansible.builtin.systemd:
+        name: filebrowser
+        enabled: true
+        state: started
+        daemon_reload: true
+
+- name: Apply pending restarts
+  ansible.builtin.meta: flush_handlers

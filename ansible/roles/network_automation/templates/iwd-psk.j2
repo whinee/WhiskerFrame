@@ -1,0 +1,12 @@
+# iwd PSK network profile for "{{ item.name }}" — managed by Ansible.
+# Rendered to /var/lib/iwd/{{ item.name }}.psk. Credentials come from VAULTED
+# host_vars; nothing secret is committed in the role.
+
+[Security]
+Passphrase={{ item.psk }}
+
+[Settings]
+AutoConnect={{ (item.autoconnect | default(true)) | lower }}
+{% if item.hidden | default(false) %}
+Hidden=true
+{% endif %}

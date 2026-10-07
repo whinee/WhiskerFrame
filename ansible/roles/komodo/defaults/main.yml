@@ -1,0 +1,31 @@
+---
+# Defaults for the komodo role (TSK-04). Override in group_vars/host_vars.
+komodo_project_dir: "{{ deploy_root }}/komodo"
+komodo_env_file: "{{ komodo_project_dir }}/.env.komodo"
+
+# Pinned image tags (no :latest — Komodo warns upgrades can be breaking).
+# COMPOSE_KOMODO_IMAGE_TAG defaults to "2" upstream; pin to a concrete tag.
+komodo_version: "1.19.4"            # ghcr.io/moghtech/komodo-core tag (verified)
+ferretdb_version: "2.5.0"           # ghcr.io/ferretdb/ferretdb tag (verified; 2.6.0 does not exist)
+documentdb_version: "17-0.106.0-ferretdb-2.5.0"  # matched postgres-documentdb for ferretdb 2.5.0 (verified)
+
+# Database identity (password generated once at deploy time, never committed).
+komodo_db_username: komodo
+
+# Komodo Core first-run admin. Password is generated once (like the DB password)
+# and written to .env.komodo; it is NOT committed. Change via the UI after login.
+komodo_admin_username: admin
+komodo_host_url: "http://{{ ansible_host | default('localhost') }}:{{ komodo_port }}"
+
+# Keep Docker's data-root and Komodo backups on the SSD — spares the SD card and
+# gives containers room. Derived from the storage mount (group_vars).
+docker_data_root: "{{ ssd_mount_point }}/docker"
+komodo_backups_path: "{{ ssd_mount_point }}/komodo-backups"
+
+# Per-service memory ceilings for the Pi Zero 2W (~416MB RAM). Sum ~384m.
+komodo_mem_core: "160m"
+komodo_mem_postgres: "160m"
+komodo_mem_ferretdb: "64m"
+
+# Komodo Core HTTP port (host:container).
+komodo_port: 9120

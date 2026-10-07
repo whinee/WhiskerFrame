@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# network-arbiter — single owner of the AP-vs-client decision for the ONE radio.
+# Managed by Ansible (network_automation role). DO NOT edit by hand.
+#
+# Logic:
+#   1. Ask iwd whether wlan0 associated to a known network within a timeout.
+#   2. If YES  -> client mode: ensure hostapd + dnsmasq are STOPPED, drop any
+#                 static AP IP from wlan0. iwd owns the link.
+#   3. If NO   -> AP fallback: stop iwd station activity on the link, assign the
+#                 static AP IP, start hostapd + dnsmasq.
+#   NEVER runs both AP and client at once (single radio).
+#
+# Field-robustness: this script must never wedge the box. Every external call is
+# guarded; transient failures are logged and the loop simply re-evaluates on the
+# next timer tick. No interactive prompts, no unbounded waits.
+set -uo pipefail
+
+IFACE="{{ ap_interface }}"
+CLIENT_TIMEOUT="{{ arbiter_client_timeout_secs }}"
+AP_IP="{{ ap_static_ip }}"
+# /24 for the 255.255.255.0 AP subnet (matches dnsmasq.conf netmask).
+AP_PREFIX="24"
+
+log() { logger -t network-arbiter -- "$*"; echo "network-arbiter: $*" >&2; }
+
+# Is iwd associated to a known network on $IFACE? Returns 0 if connected.
+iwd_connected() {
+    # `iwctl station <iface> show` prints "State  connected" when associated.
+    local out
+    out="$(timeout 10 iwctl station "$IFACE" show 2>/dev/null)" || return 1
+    echo "$out" | grep -Eiq '^\s*State\s+connected' && return 0
+    return 1
+}
+
+# Wait up to CLIENT_TIMEOUT for iwd to associate, polling every 3s.
+wait_for_client() {
+    local waited=0
+    while [ "$waited" -lt "$CLIENT_TIMEOUT" ]; do
+        if iwd_connected; then
+            return 0
+        fi
+        sleep 3
+        waited=$((waited + 3))
+    done
+    return 1
+}
+
+stop_ap() {
+    log "Ensuring AP services stopped (client mode)."
+    systemctl stop hostapd.service 2>/dev/null || true
+    systemctl stop dnsmasq.service 2>/dev/null || true
+    # Drop the static AP IP if we previously assigned it; ignore if absent.
+    ip addr del "${AP_IP}/${AP_PREFIX}" dev "$IFACE" 2>/dev/null || true
+}
+
+start_ap() {
+    log "No known network found -> bringing up AP fallback."
+    # Make sure iwd is not holding the radio as a station; disconnect is best-effort.
+    timeout 10 iwctl station "$IFACE" disconnect 2>/dev/null || true
+    # Assign the static AP IP (idempotent: replace).
+    ip addr flush dev "$IFACE" 2>/dev/null || true
+    ip addr add "${AP_IP}/${AP_PREFIX}" dev "$IFACE" 2>/dev/null || true
+    ip link set "$IFACE" up 2>/dev/null || true
+    systemctl start hostapd.service 2>/dev/null \
+        || log "WARN: hostapd failed to start; will retry next tick."
+    systemctl start dnsmasq.service 2>/dev/null \
+        || log "WARN: dnsmasq failed to start; will retry next tick."
+}
+
+main() {
+    # Guard: iwd must be present/active for client mode to be possible.
+    if ! systemctl is-active --quiet iwd.service; then
+        log "iwd not active; attempting start before deciding."
+        systemctl start iwd.service 2>/dev/null || true
+        sleep 3
+    fi
+
+    if wait_for_client; then
+        log "iwd associated on ${IFACE} -> client mode."
+        stop_ap
+    else
+        log "iwd did not associate within ${CLIENT_TIMEOUT}s on ${IFACE}."
+        start_ap
+    fi
+}
+
+main "$@"

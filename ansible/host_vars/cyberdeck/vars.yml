@@ -1,0 +1,4 @@
+git_authorized_keys:
+  - "{{ operator_git_public_key }}"
+git_initial_repos:
+  - "test_throwaway"
