@@ -500,3 +500,24 @@ Initial specifications only codified agent and subsystem wire contracts. No requ
 
 **Tradeoffs / Risk:**
 - Adding an RTC uses additional physical space within the tight (<65mm) depth constraint. UART debugging requires opening the case or provisioning a breakout port.
+
+---
+
+## DEC-W16: Section 2 Feature Baselines
+
+**Date:** 2026-10-08
+
+**Problem:** 
+The platform lacked prioritization of daily software features (Web, Audio, Gaming, Messaging). It was unclear what software to bind and map to the limited CPU budget.
+
+**Root Cause:**
+No established capability requirements past Linux root access.
+
+**Decision:**
+- Over a dozen user-facing requirements authored in `product-requirements.md` block `REQ-PF-*`.
+- **Text-Only Rule Enforced:** Given the UART serial bottleneck (11.5 KB/s), Web Browsing, Discord, and Retro Emulation/Gaming are strictly confined to Text Mode/CLI TUI paradigms.
+- **Audio Confirmed:** Added requirement for streaming audio out over the secondary USB-C port via a 3.5mm adapter.
+- **Power Savings:** The dashboard (battery/network/git) is bound to an on-demand key-chord rather than an always-on polling widget to conserve power on the 10k mAh pack.
+
+**Tradeoffs / Risk:**
+- Text-mode Discord risks TOS bans for self-bots or 3rd party clients. Audio decoding will steal critical cycles and draw power, limiting terminal snappiness.
