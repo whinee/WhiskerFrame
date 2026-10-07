@@ -551,3 +551,13 @@ Noted. Escaped local  from the post-push checklist.
 **Section 1 Processed:**
 - Generated `F-01.03` through `F-01.07` covering hardware input (CardKB validation), thickness limits, open-case humidity concerns (PH climate constraint), and anti-boredom platform goals.
 - Logged a **contradiction (Item 3)**: the desire to "open source everything about this project" (1.08) directly collides with retaining the `assets/images/cess` artistic assets that carry a "No redistribution" clause (A.12).
+
+## Q: 2026-10-07 - Followup Formatting Fix
+### Question/Action (Operator)
+* Correct format requirements for `0-followups-*.md`: Single `> A:` block per entry, include arithmetic in physics checks, 1-3 lines of rationale, and no statement-only observations. Merge duplicate contradictions.
+
+### Answer (Agent)
+* Regenerated `0-followups-A.md` and `0-followups-01.md`.
+* Stripped out statement-only observations.
+* Included explicit arithmetic for the "physics-check" on manga reading over a 11.5 KB/s UART.
+* Deduped `contradictions.md` to just the Asset Redistribution and OTG Power issues.
