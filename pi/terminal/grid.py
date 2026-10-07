@@ -370,6 +370,28 @@ class Grid:
         clone.cursor_col = self.cursor_col
         return clone
 
+    def render_with_cursor(self, cursor_fg: int, cursor_bg: int) -> Grid:
+        """
+        Return a copy of the grid with the cursor position highlighted.
+
+        Args:
+        - cursor_fg (`int`): RGB565 foreground for the cursor cell.
+        - cursor_bg (`int`): RGB565 background for the cursor cell.
+
+        Returns:
+        `Grid`: A grid copy with the cursor position highlighted.
+
+        """
+        clone = self.snapshot()
+        if clone._in_bounds(clone.cursor_row, clone.cursor_col):
+            cell = clone.cell_at(clone.cursor_row, clone.cursor_col)
+            clone._cells[clone.cursor_row][clone.cursor_col] = Cell(
+                char=cell.char,
+                fg=cursor_fg,
+                bg=cursor_bg,
+            )
+        return clone
+
     def _row_runs(self, row: int, changed: list[bool]) -> list[CellRun]:
         """
         Coalesce the changed cells of one row into color-consistent runs.
