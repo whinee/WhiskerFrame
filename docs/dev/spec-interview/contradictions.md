@@ -45,3 +45,16 @@
 > **Resolution: How would (b) work? It is already what I am doing right now. How do you think I will be able to connect the device to the programmer PC if the device is already acting as a host? (c) it is then, but that is SOOOOO janky huhuuu :C**
 
 
+
+### C-03 · HIGH · OPEN · A5 Size Parameter vs Battery/Dongles volume
+**Sources:** 2.01, A.07, topology
+**You said:** "Daily Driver!" (2.01); "Less than A5 size" (A.07); "Size should be ideally less than A5" (A.07)
+**Why it conflicts:** You want this to be a daily driver phone replacement that you can slip into a bag or pocket (A5 footprint limit, <65mm depth, A.11). However, the physical BOM currently includes a 10,000mAh Anker PD bank, a USB OTG hub, a ZTE LTE stick, and an RTL-SDR receiver sticking out of it. Stacking all these COTS (commercial off-the-shelf) components inside an enclosed weather-sealed case (REQ-UW-02) will easily break the <65mm thickness constraint. 
+**Options:**
+- (a) Abandon the RTL-SDR and LTE stick entirely, keeping it strictly to the Pi, battery, and Keyboard.
+- (b) Accept a much larger or vastly thicker (>65mm) enclosure.
+- (c) Disassemble the Anker battery bank, LTE stick, and USB hub to their bare PCBs and solder them directly to minimize Z-height, accepting the extremely high risk of battery puncture or hardware death.
+**Recommendation:** (c) for long-term if it MUST be a phone replacement, but (a) is the only immediately executable software/hardware path for the current wave.
+**Q: How do you want to resolve the physical volume limits of combining a USB Hub, LTE Modem, and 10k battery under 65mm thick?**
+> A: 
+**Resolution:** 
