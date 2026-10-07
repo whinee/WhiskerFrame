@@ -1,0 +1,15 @@
+---
+# Handlers for the network_automation role (TSK-05).
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: reload systemd
+
+- name: restart iwd
+  ansible.builtin.systemd:
+    name: iwd
+    state: restarted
+  listen: restart iwd
+  # Only meaningful once we have taken over wlan0.
+  when: network_automation_apply | bool

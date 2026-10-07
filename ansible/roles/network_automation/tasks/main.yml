@@ -1,0 +1,381 @@
+---
+# TSK-05 — Offline network automation for the Pi Zero 2W (ONE radio, headless,
+# remote). iwd OWNS wlan0 for client association; hostapd + dnsmasq provide an AP
+# fallback that binds wlan0 ONLY when no known network is found. The arbiter is
+# the single owner of the AP-vs-client decision; the two modes never run at once.
+#
+# ====================================================================
+# SAFETY MODEL (read defaults/main.yml header too)
+# ====================================================================
+# This box is HEADLESS + REMOTE: a bad wlan0 switch can lock the operator out.
+# So this role is split in two:
+#
+#   STAGING (always runs, non-disruptive): install packages, write iwd/hostapd/
+#   dnsmasq config, render client profiles, install the arbiter + rollback
+#   scripts and systemd units — but do NOT enable/start them and do NOT touch the
+#   live NetworkManager/wpa_supplicant setup. Safe under a plain `site.yml` run.
+#
+#   APPLY (gated by `network_automation_apply`, DEFAULT FALSE): capture known-good
+#   state, ARM the lockout rollback, mask NM + wpa_supplicant, hand wlan0 to iwd,
+#   and enable the arbiter. Only this half can cut the network.
+#
+# `--check`-friendly: staging is pure file/package state; apply tasks use
+# check_mode-safe modules or guard commands with changed_when.
+
+# ==========================================================================
+# STAGING — always safe, never disrupts the live network
+# ==========================================================================
+
+- name: Install iwd, hostapd and dnsmasq (staged — not enabled yet)
+  ansible.builtin.apt:
+    name:
+      - iwd
+      - hostapd
+      - dnsmasq
+    state: present
+    update_cache: true
+  tags: [network]
+
+# hostapd ships masked on Debian; it is driven by the arbiter, never by its own
+# boot-time unit. dnsmasq likewise must not auto-start on all interfaces. We make
+# that explicit regardless of apply mode so staging alone never flips wlan0.
+- name: Mask the stock hostapd boot unit (arbiter is the only thing that starts it)
+  failed_when: false
+  ansible.builtin.systemd:
+    name: hostapd
+    enabled: false
+    masked: true
+    force: true
+  tags: [network]
+
+- name: Prevent dnsmasq from auto-starting on boot (arbiter owns it)
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: false
+    state: stopped
+  failed_when: false
+  tags: [network]
+
+- name: Ensure iwd config directory exists
+  ansible.builtin.file:
+    path: /etc/iwd
+    state: directory
+    mode: "0755"
+  tags: [network]
+
+- name: Render the iwd main.conf (client manager, built-in DHCP)
+  ansible.builtin.template:
+    src: iwd-main.conf.j2
+    dest: /etc/iwd/main.conf
+    mode: "0644"
+  notify: restart iwd
+  tags: [network]
+
+- name: Ensure the iwd network-profile store exists
+  ansible.builtin.file:
+    path: /var/lib/iwd
+    state: directory
+    mode: "0700"
+  tags: [network]
+
+# --- iwd client network profiles -----------------------------------------
+# BLOCKED-ON-OPERATOR: wifi_networks is EMPTY by default. Real PSK / 802.1X
+# credentials come from VAULTED host_vars. These tasks are no-ops until the
+# operator supplies vaulted entries; nothing secret is ever committed here.
+- name: Render iwd PSK profiles for configured networks
+  ansible.builtin.template:
+    src: iwd-psk.j2
+    dest: "/var/lib/iwd/{{ item.name }}.psk"
+    mode: "0600"
+  loop: "{{ wifi_networks | selectattr('type', 'equalto', 'psk') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true                      # passphrases must never hit the log
+  notify: restart iwd
+  tags: [network]
+
+- name: Render iwd 802.1X (enterprise) profiles for configured networks
+  ansible.builtin.template:
+    src: iwd-8021x.j2
+    dest: "/var/lib/iwd/{{ item.name }}.8021x"
+    mode: "0600"
+  loop: "{{ wifi_networks | selectattr('type', 'equalto', '8021x') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true                      # enterprise creds must never hit the log
+  notify: restart iwd
+  tags: [network]
+
+# Open networks: iwd associates with no credentials, so an empty .open profile
+# marks it as a known/autoconnect network. Captive-portal sign-in (if any) is a
+# BROWSER-layer step iwd cannot perform headlessly — operator note only.
+- name: Render iwd open-network markers for configured networks
+  ansible.builtin.copy:
+    dest: "/var/lib/iwd/{{ item.name }}.open"
+    content: |
+      [Settings]
+      AutoConnect={{ (item.autoconnect | default(true)) | lower }}
+    mode: "0600"
+  loop: "{{ wifi_networks | selectattr('type', 'equalto', 'open') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: restart iwd
+  tags: [network]
+
+# --- AP fallback config (staged) -----------------------------------------
+- name: Render the hostapd AP-fallback config
+  ansible.builtin.template:
+    src: hostapd.conf.j2
+    dest: /etc/hostapd/hostapd.conf
+    mode: "0600"                    # contains the AP passphrase
+  no_log: true
+  tags: [network]
+
+- name: Point the hostapd defaults at our config file
+  ansible.builtin.lineinfile:
+    path: /etc/default/hostapd
+    regexp: '^#?DAEMON_CONF='
+    line: 'DAEMON_CONF="/etc/hostapd/hostapd.conf"'
+    create: true
+    mode: "0644"
+  tags: [network]
+
+- name: Render the dnsmasq AP-fallback config (scoped to the AP interface)
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: "/etc/dnsmasq.d/network-automation-ap.conf"
+    mode: "0644"
+  tags: [network]
+
+# --- Arbiter + rollback scripts and units (staged, not enabled) ----------
+- name: Install the AP-vs-client arbiter script
+  ansible.builtin.template:
+    src: network-arbiter.sh.j2
+    dest: /usr/local/sbin/network-arbiter
+    mode: "0750"
+    owner: root
+    group: root
+  tags: [network]
+
+- name: Install the lockout rollback script
+  ansible.builtin.template:
+    src: network-rollback.sh.j2
+    dest: /usr/local/sbin/network-rollback
+    mode: "0750"
+    owner: root
+    group: root
+  tags: [network]
+
+- name: Ensure the lockout state directory exists
+  ansible.builtin.file:
+    path: "{{ lockout_state_dir }}"
+    state: directory
+    mode: "0750"
+  tags: [network]
+
+- name: Install the arbiter, rollback and MemoryMax systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - network-arbiter.service
+    - network-arbiter.timer
+    - network-rollback.service
+    - network-rollback.timer
+  notify: reload systemd
+  tags: [network]
+
+# MemoryMax drop-ins for the packaged daemons (small box; DEC-W10 lesson).
+- name: Ensure drop-in directories for iwd/hostapd/dnsmasq exist
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    mode: "0755"
+  loop:
+    - iwd
+    - hostapd
+    - dnsmasq
+  tags: [network]
+
+- name: Install MemoryMax drop-ins for iwd/hostapd/dnsmasq
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.unit }}.service.d/memory.conf"
+    content: |
+      [Service]
+      MemoryMax={{ item.max }}
+    mode: "0644"
+  loop:
+    - { unit: "iwd", max: "{{ iwd_mem_max }}" }
+    - { unit: "hostapd", max: "{{ hostapd_mem_max }}" }
+    - { unit: "dnsmasq", max: "{{ dnsmasq_mem_max }}" }
+  loop_control:
+    label: "{{ item.unit }}"
+  notify: reload systemd
+  tags: [network]
+
+- name: Set the regulatory domain for the radio
+  ansible.builtin.copy:
+    dest: /etc/default/crda
+    content: "REGDOMAIN={{ network_country_code }}\n"
+    mode: "0644"
+  tags: [network]
+
+# Make sure the staged units are registered before any apply-phase enable.
+- name: Reload systemd so staged units are visible
+  ansible.builtin.systemd:
+    daemon_reload: true
+  changed_when: false
+  tags: [network]
+
+# ==========================================================================
+# STAGED-ONLY STOP POINT
+# ==========================================================================
+# Everything above is non-disruptive. If apply is false (the DEFAULT), we stop
+# here: iwd is NOT enabled, NM/wpa_supplicant are untouched, the arbiter is NOT
+# armed, the live network is NOT cut. This is the safe `site.yml` path.
+- name: Report staged-only status and skip the disruptive switch
+  ansible.builtin.debug:
+    msg: >-
+      network_automation is STAGED ONLY (network_automation_apply=false). iwd and
+      the arbiter are installed but NOT active; NetworkManager/wpa_supplicant are
+      untouched. The live network was NOT changed. Set network_automation_apply=true
+      ONLY with console/out-of-band recovery available — the lockout rollback will
+      arm automatically.
+  when: not (network_automation_apply | bool)
+  tags: [network]
+
+# ==========================================================================
+# APPLY — DISRUPTIVE. Gated by network_automation_apply (DEFAULT FALSE).
+# Captures state, ARMS rollback, then switches wlan0 to iwd.
+# ==========================================================================
+- name: Disruptive wlan0 switch (guarded by lockout rollback)
+  when: network_automation_apply | bool
+  tags: [network]
+  block:
+    # --- (a) capture known-good current network state ---------------------
+    - name: Capture the current NetworkManager/wpa_supplicant unit state
+      ansible.builtin.shell: |
+        set -o pipefail
+        systemctl is-enabled NetworkManager.service 2>/dev/null || true
+        systemctl is-active  NetworkManager.service 2>/dev/null || true
+        systemctl is-enabled wpa_supplicant.service 2>/dev/null || true
+        systemctl is-active  wpa_supplicant.service 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      register: netstate_units
+      changed_when: false
+
+    - name: Capture the current IP/route layout (known-good snapshot)
+      ansible.builtin.shell: |
+        set -o pipefail
+        ip -o addr show 2>/dev/null || true
+        ip route show 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      register: netstate_ip
+      changed_when: false
+
+    - name: Persist the known-good network snapshot for rollback/forensics
+      ansible.builtin.copy:
+        dest: "{{ lockout_state_dir }}/known-good-state.txt"
+        content: |
+          # Captured by network_automation before the wlan0 switch.
+          ## unit state
+          {{ netstate_units.stdout }}
+          ## ip/route
+          {{ netstate_ip.stdout }}
+        mode: "0640"
+
+    # --- (b) ARM the lockout rollback BEFORE cutting anything -------------
+    # Clear any stale sentinel so the timer starts from a clean "unconfirmed".
+    - name: Ensure the sentinel runtime directory exists
+      ansible.builtin.file:
+        path: "{{ lockout_sentinel_path | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Clear any stale connectivity sentinel (start unconfirmed)
+      ansible.builtin.file:
+        path: "{{ lockout_sentinel_path }}"
+        state: absent
+
+    - name: ARM the lockout rollback timer (fires if connectivity not confirmed)
+      ansible.builtin.systemd:
+        name: network-rollback.timer
+        enabled: true
+        state: restarted
+        daemon_reload: true
+
+    # --- hand wlan0 to iwd: stop/disable/mask the old managers ------------
+    - name: Stop, disable and mask wpa_supplicant (iwd owns wlan0 now)
+      ansible.builtin.systemd:
+        name: wpa_supplicant.service
+        state: stopped
+        enabled: false
+        masked: true
+      failed_when: false
+
+    # RISK (headless wifi box): masking NetworkManager wholesale is acceptable
+    # here because wlan0 is the only link that matters (confirmed single-radio by
+    # the orchestrator). If this host ever grows an NM-managed eth0/USB link that
+    # must stay up, set mask_networkmanager=false and manage only wpa_supplicant.
+    - name: Stop, disable and mask NetworkManager (single-radio wifi box)
+      ansible.builtin.systemd:
+        name: NetworkManager.service
+        state: stopped
+        enabled: false
+        masked: true
+      failed_when: false
+      when: mask_networkmanager | bool
+
+    # --- bring iwd + the arbiter online -----------------------------------
+    - name: Enable and start iwd (client manager for wlan0)
+      ansible.builtin.systemd:
+        name: iwd
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Enable and start the arbiter timer (single owner of AP-vs-client)
+      ansible.builtin.systemd:
+        name: network-arbiter.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Run the arbiter once now to settle AP-vs-client immediately
+      ansible.builtin.systemd:
+        name: network-arbiter.service
+        state: started
+
+# ==========================================================================
+# CONFIRM CONNECTIVITY — DISARM the rollback.
+# Run this explicitly (operator-gated) once the Pi is confirmed reachable:
+#   ansible-playbook site.yml --tags network \
+#     -e network_automation_apply=true -e network_automation_confirm=true
+# It creates the sentinel so network-rollback sees "confirmed" and disarms.
+# ==========================================================================
+- name: Confirm connectivity and disarm the lockout rollback
+  when:
+    - network_automation_apply | bool
+    - network_automation_confirm | default(false) | bool
+  tags: [network]
+  block:
+    - name: Write the connectivity-confirmed sentinel
+      ansible.builtin.copy:
+        dest: "{{ lockout_sentinel_path }}"
+        content: "confirmed {{ ansible_date_time.iso8601 | default('now') }}\n"
+        mode: "0644"
+
+    - name: Disarm the lockout rollback timer (switch confirmed good)
+      ansible.builtin.systemd:
+        name: network-rollback.timer
+        enabled: false
+        state: stopped
+
+    - name: Report that iwd now owns wlan0 and rollback is disarmed
+      ansible.builtin.debug:
+        msg: >-
+          Connectivity confirmed. iwd owns wlan0; the lockout rollback is
+          disarmed. NetworkManager/wpa_supplicant remain masked.

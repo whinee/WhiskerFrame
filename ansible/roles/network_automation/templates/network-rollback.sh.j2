@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# network-rollback — LOCKOUT GUARD for the headless remote Pi. Managed by Ansible
+# (network_automation role). DO NOT edit by hand.
+#
+# Fired by network-rollback.timer N minutes after the disruptive network switch.
+# If the operator (or a reachability check) has NOT created the connectivity
+# sentinel, we assume the switch cut SSH and we RESTORE the previous network
+# manager so the box comes back:
+#   - stop + disable the iwd-based stack and the arbiter
+#   - unmask + enable + start NetworkManager and wpa_supplicant
+#   - restore the captured known-good state marker
+#
+# If the sentinel IS present, the switch is confirmed good: we DISARM (stop this
+# timer) and leave iwd in charge.
+set -uo pipefail
+
+SENTINEL="{{ lockout_sentinel_path }}"
+STATE_DIR="{{ lockout_state_dir }}"
+
+log() { logger -t network-rollback -- "$*"; echo "network-rollback: $*" >&2; }
+
+if [ -f "$SENTINEL" ]; then
+    log "Connectivity sentinel present ($SENTINEL) -> switch confirmed good. Disarming rollback."
+    systemctl stop network-rollback.timer 2>/dev/null || true
+    systemctl disable network-rollback.timer 2>/dev/null || true
+    exit 0
+fi
+
+log "No connectivity sentinel after window -> ASSUMING LOCKOUT. Restoring previous network manager."
+
+# Tear down the iwd-based stack + arbiter (best-effort; never block).
+systemctl stop network-arbiter.timer 2>/dev/null || true
+systemctl stop network-arbiter.service 2>/dev/null || true
+systemctl stop hostapd.service 2>/dev/null || true
+systemctl stop dnsmasq.service 2>/dev/null || true
+systemctl stop iwd.service 2>/dev/null || true
+systemctl disable iwd.service 2>/dev/null || true
+
+# Restore NetworkManager + wpa_supplicant (unmask -> enable -> start).
+for unit in NetworkManager.service wpa_supplicant.service; do
+    systemctl unmask "$unit" 2>/dev/null || true
+    systemctl enable "$unit" 2>/dev/null || true
+    systemctl start "$unit" 2>/dev/null || true
+done
+
+# Drop any AP static IP we may have assigned so NM can manage the link cleanly.
+ip addr flush dev "{{ ap_interface }}" 2>/dev/null || true
+
+touch "${STATE_DIR}/rollback-fired" 2>/dev/null || true
+log "Rollback complete. NetworkManager/wpa_supplicant restored; iwd stopped."
+
+# Self-disarm so we do not fire again in a loop.
+systemctl stop network-rollback.timer 2>/dev/null || true
+systemctl disable network-rollback.timer 2>/dev/null || true
+exit 0

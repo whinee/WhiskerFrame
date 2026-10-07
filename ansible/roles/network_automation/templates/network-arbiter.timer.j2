@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically re-run the network arbiter (AP-vs-client)
+
+[Timer]
+# Run shortly after boot, then on a steady cadence so a dropped client network
+# falls back to AP and a returning network reclaims client mode.
+OnBootSec=30
+OnUnitActiveSec={{ arbiter_poll_interval }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,103 @@
+---
+# TSK-03 — SD-card wear reduction: persist journald onto the ext4 SSD and buffer
+# /var/log in RAM via log2ram.
+#
+# Ordering rationale: we put the journal ON the SSD and make /var/log/journal a
+# symlink to it. log2ram manages /var/log as a RAM tmpfs synced to disk; because
+# the journal is a symlink out to the SSD, log2ram only shuffles the symlink, not
+# gigabytes of journal data. Set up journald first, then log2ram.
+#
+# Depends on the ext4 SSD mount being live (TSK-02). Asserted below — fail fast
+# rather than write journals to a dead path.
+
+- name: Assert the SSD is mounted at the configured point with the expected UUID
+  ansible.builtin.assert:
+    that:
+      - ssd_mount_point in (ansible_mounts | map(attribute='mount') | list)
+      - >-
+        (ansible_mounts | selectattr('mount', 'equalto', ssd_mount_point)
+         | map(attribute='uuid') | first) == ssd_device_uuid
+    fail_msg: >-
+      SSD not mounted at {{ ssd_mount_point }} with UUID {{ ssd_device_uuid }} —
+      the TSK-02 mount unit is not live. Run the storage mount first.
+    success_msg: "SSD confirmed at {{ ssd_mount_point }} ({{ ssd_device_uuid }})."
+
+# --- journald persistent store on the SSD ---------------------------------
+- name: Create the journald persistent directory on the SSD
+  ansible.builtin.file:
+    path: "{{ journald_dir }}"
+    state: directory
+    owner: root
+    group: systemd-journal
+    mode: "2755"
+
+- name: Point /var/log/journal at the SSD journal directory (symlink)
+  ansible.builtin.file:
+    path: /var/log/journal
+    src: "{{ journald_dir }}"
+    state: link
+    force: true
+    follow: false
+
+- name: Configure journald for persistent, size-capped storage
+  community.general.ini_file:
+    path: /etc/systemd/journald.conf
+    section: Journal
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    mode: "0644"
+  loop:
+    - { option: "Storage", value: "persistent" }
+    - { option: "SystemMaxUse", value: "{{ journald_max_use }}" }
+  notify: restart systemd-journald
+
+# --- log2ram (azlux repo, arm64/trixie) -----------------------------------
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add the azlux (log2ram) apt signing key
+  ansible.builtin.get_url:
+    url: https://azlux.fr/repo.gpg
+    dest: /etc/apt/keyrings/azlux.gpg
+    mode: "0644"
+
+- name: Add the azlux apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture | replace('aarch64', 'arm64') }}
+      signed-by=/etc/apt/keyrings/azlux.gpg]
+      http://packages.azlux.fr/debian/ stable main
+    filename: azlux
+    state: present
+    update_cache: true
+
+- name: Install log2ram
+  ansible.builtin.apt:
+    name: log2ram
+    state: present
+    update_cache: true
+
+- name: Configure log2ram size and disable mail
+  ansible.builtin.lineinfile:
+    path: /etc/log2ram.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^SIZE=', line: "SIZE={{ log2ram_size }}" }
+    - { regexp: '^MAIL=', line: "MAIL=false" }
+  notify: restart log2ram
+
+- name: Enable and start log2ram
+  ansible.builtin.systemd:
+    name: log2ram
+    enabled: true
+    state: started
+
+# Flush journald restart + journal flush now (before the role ends), so later
+# roles and verification see the persistent store in effect.
+- name: Apply pending restarts
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,6 @@
+---
+# Host vars for the Pi Zero 2W. Plain values reference vaulted ones in vault.yml
+# (encrypted with ansible-vault; password file lives outside the repo, see
+# ansible.cfg vault_password_file). Never put a secret in this file.
+git_authorized_keys: "{{ vault_git_authorized_keys }}"
+netbird_setup_key: "{{ vault_netbird_setup_key }}"

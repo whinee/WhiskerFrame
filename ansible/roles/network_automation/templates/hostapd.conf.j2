@@ -1,0 +1,22 @@
+# hostapd config — AP FALLBACK ONLY, managed by Ansible (network_automation).
+# Brought up by the arbiter ONLY when no known client network is found. NEVER
+# runs concurrently with iwd client mode (single radio).
+
+interface={{ ap_interface }}
+driver=nl80211
+ssid={{ ap_ssid }}
+hw_mode={{ ap_hw_mode }}
+channel={{ ap_channel }}
+country_code={{ network_country_code }}
+ieee80211d=1
+
+# WPA2-PSK (CCMP). Passphrase comes from vars (vault it for real use).
+auth_algs=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase={{ ap_passphrase }}
+
+# Local-only AP; no bridge. The arbiter assigns the static IP on {{ ap_interface }}.
+macaddr_acl=0
+ignore_broadcast_ssid=0

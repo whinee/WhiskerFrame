@@ -1,0 +1,68 @@
+## {{ ansible_managed }}
+## Komodo 2.0 + FerretDB on the Pi Zero 2W. Derived from Komodo's official
+## ferretdb.compose.yaml, with: periphery dropped (RAM), tags pinned, per-service
+## mem_limit, and named volumes landing on the SSD-backed Docker data-root.
+## Secrets come from ./.env.komodo (env_file), never inline here.
+---
+services:
+  postgres:
+    image: ghcr.io/ferretdb/postgres-documentdb:{{ documentdb_version }}
+    restart: unless-stopped
+    mem_limit: {{ komodo_mem_postgres }}
+    environment:
+      POSTGRES_USER: ${KOMODO_DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${KOMODO_DATABASE_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KOMODO_DATABASE_USERNAME} -d postgres"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  ferretdb:
+    image: ghcr.io/ferretdb/ferretdb:{{ ferretdb_version }}
+    restart: unless-stopped
+    mem_limit: {{ komodo_mem_ferretdb }}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FERRETDB_POSTGRESQL_URL: postgres://${KOMODO_DATABASE_USERNAME}:${KOMODO_DATABASE_PASSWORD}@postgres:5432/postgres
+    volumes:
+      - ferretdb-state:/state
+    healthcheck:
+      test: ["CMD-SHELL", "/ferretdb --version || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+  core:
+    image: ghcr.io/moghtech/komodo-core:${COMPOSE_KOMODO_IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: {{ komodo_mem_core }}
+    depends_on:
+      ferretdb:
+        condition: service_started
+    env_file: ./.env.komodo
+    environment:
+      KOMODO_DATABASE_ADDRESS: ferretdb:27017
+    ports:
+      - "{{ komodo_port }}:9120"
+    volumes:
+      - keys:/config/keys
+      - ${COMPOSE_KOMODO_BACKUPS_PATH}:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9120/ >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 15
+      start_period: 90s
+
+volumes:
+  postgres-data:
+  ferretdb-state:
+  keys:

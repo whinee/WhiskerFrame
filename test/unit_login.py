@@ -36,6 +36,8 @@ from terminal.login import (
 
 _UP: int = 0xB5
 _DOWN: int = 0xB6
+_LEFT: int = 0xB4
+_ESC: int = 0x1B
 _ENTER: int = 0x0D
 _BACKSPACE: int = 0x08
 
@@ -109,6 +111,60 @@ def check_backspace() -> None:
     assert event.password == "ab"  # noqa: S105
 
 
+def check_left_arrow_navigation() -> None:
+    """
+    Assert pressing Left arrow or Esc from password screen resets to user select.
+
+    Raises:
+    - `AssertionError`: If pressing Left or Esc fails to return to user select.
+
+    Returns:
+    `None`: Returns nothing on success.
+
+    """
+    state = LoginState(users=["root", "neko"])
+    state.feed_key(_ENTER)
+    assert state.screen is LoginScreen.PASSWORD
+    for ch in b"secret":
+        state.feed_key(ch)
+    assert state.masked() == "******"
+
+    # Pressing Left arrow resets to USER_SELECT and clears password
+    assert state.feed_key(_LEFT) is None
+    assert state.screen is LoginScreen.USER_SELECT
+    assert state.masked() == ""
+
+    # Re-enter password screen and test Esc key
+    state.feed_key(_ENTER)
+    assert state.screen is LoginScreen.PASSWORD
+    for ch in b"xyz":
+        state.feed_key(ch)
+    assert state.feed_key(_ESC) is None
+    assert state.screen is LoginScreen.USER_SELECT
+    assert state.masked() == ""
+
+
+def check_clear_password() -> None:
+    """
+    Assert clear_password empties the buffer while staying on the current screen.
+
+    Raises:
+    - `AssertionError`: If password is not cleared or screen changes.
+
+    Returns:
+    `None`: Returns nothing on success.
+
+    """
+    state = LoginState(users=["neko"])
+    state.feed_key(_ENTER)
+    for ch in b"secret":
+        state.feed_key(ch)
+    assert state.masked() == "******"
+    state.clear_password()
+    assert state.masked() == ""
+    assert state.screen is LoginScreen.PASSWORD
+
+
 def check_empty_users_rejected() -> None:
     """
     Assert constructing with an empty user list raises.
@@ -165,6 +221,8 @@ def main() -> None:
         check_user_navigation()
         check_password_masking()
         check_backspace()
+        check_left_arrow_navigation()
+        check_clear_password()
         check_empty_users_rejected()
         check_authenticate_guard()
     except AssertionError as exc:

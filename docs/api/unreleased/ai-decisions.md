@@ -777,3 +777,88 @@ line scroll and emit a dedicated `SCROLL` op.
   consistent with field-robustness (a simpler, never-wedging path beats a richer
   one that can mis-scroll). The firmware `SCROLL` op remains available for a
   future optimization but is not required for correctness.
+
+## CYD terminal: login screen wrong-password feedback & Left-arrow navigation
+
+### Context
+
+On the CYD terminal login screen, authentication failures previously reset the
+login state machine back to the user selection screen immediately, causing the
+transient error message to be skipped during rendering. In addition, there was no
+way to navigate back from the password prompt to the user selection screen if the
+wrong user was selected. On a sealed cyberdeck without a secondary console, any
+unexpected account lockout or confusing state transition degrades usability.
+
+### Decision
+
+1. **Left-arrow and Esc navigation on password screen.** In `LoginState._feed_password`,
+   pressing Left arrow (`0xB4` on CardKB) or Esc (`0x1B`) triggers `reset_to_user_select()`.
+   This clears the hidden password buffer and transitions `screen` back to `LoginScreen.USER_SELECT`,
+   allowing the operator to re-select a user without submitting a credential.
+2. **Flash "wrong password" for 3 seconds without account lockout.** When authentication
+   fails, `TerminalBridge._handle_submit` calls `state.clear_password()` while keeping
+   `state.screen` at `LoginScreen.PASSWORD`. `_login` sets `error = "wrong password"`,
+   renders the prompt with the red error message on-screen, and delays for 3.0 seconds (`time.sleep(3.0)`).
+   After 3 seconds, `error` clears and the prompt repaints cleanly with a blank password buffer,
+   prompting the user again without locking out the account or resetting the screen.
+3. **Password buffer safety.** `clear_password()` empties `self._password` in place without changing
+   the active screen, ensuring plaintext password strings never linger in state or display buffers.
+
+### Consequences
+
+- Navigating between user selection and password input on the CardKB is consistent and intuitive.
+- Wrong password attempts provide clear, 3-second visual feedback on the password screen before prompting again, avoiding confusion and account lockout hangs.
+
+## CYD terminal: visual block cursor, CardKB arrow/enter key translation & compact prompt
+
+### Context
+
+When logging into a shell session on the CYD, the terminal screen previously appeared as a blank blurple screen until a key was typed because initial PTY output was not read before the first paint turn. In addition, CardKB arrow key raw bytes (`0xB5`, `0xB6`, `0xB4`, `0xB7`) were written directly to the PTY master, causing bash to echo unexpected control characters instead of navigating the cursor or history; CardKB Enter (`0x0D`) required double-presses in certain modes; and no visible cursor was rendered on the character grid, making spaces invisible. Lastly, long default prompts (`root@pi-midori-neko:~#`) consumed precious horizontal space on the 320x240 display.
+
+### Decision
+
+1. **CardKB key translation.** In `_ShellSession._drain_keys`, CardKB key bytes are mapped before writing to the PTY master:
+   - Up (`0xB5`) -> `b"\x1b[A"` (VT100 history previous)
+   - Down (`0xB6`) -> `b"\x1b[B"` (VT100 history next)
+   - Left (`0xB4`) -> `b"\x1b[D"` (VT100 cursor left)
+   - Right (`0xB7`) -> `b"\x1b[C"` (VT100 cursor right)
+   - Enter (`0x0D`) -> `b"\r"` (`0x0D`, Unix carriage return for single-press command execution)
+2. **Visual block cursor rendering.** `Grid.render_with_cursor(cursor_fg, cursor_bg)` creates a snapshot of the grid with the cell at `(cursor_row, cursor_col)` inverted (`cursor_fg=theme.bg`, `cursor_bg=theme.cursor`). In `_ShellSession._paint_session()`, this grid is diffed and sent over serial, rendering a bright filled block cursor on-screen at all times.
+3. **Immediate prompt paint on login.** `_ShellSession.pump()` invokes `_read_pty()` before the initial paint turn so the shell's login prompt renders immediately upon entering the session without requiring user input.
+4. **Compact user prompt via `/etc/profile.d/cyd_prompt.sh`.** A system-wide profile script sets `PS1='r# '` for `root`, `PS1='n$ '` for `neko`, and `PS1='${USER:0:1}\$ '` for any other user, keeping the prompt minimal on small font sizes.
+
+### Consequences
+
+- Arrow keys navigate history and move the cursor smoothly in interactive bash.
+- Enter key executes commands on a single press.
+- Block cursor clearly indicates current position and whitespace entry.
+- Shell prompt consumes minimal columns on the CYD screen.
+
+## CYD terminal: serial transport flush, login greeting, font resize & EINTR signal handling
+
+### Context
+
+Four interactive issues were identified during on-device usability testing of `cyd-terminal`:
+1. **Serial transmission latency**: Characters typed into the shell required pressing 3 to 4 keys before updating on the CYD display, at which point all buffered characters appeared at once.
+2. **Post-login blank screen**: Immediately after authentication, only a cursor at `(0, 0)` top-left was rendered until shell activity occurred; no greeting or welcome banner greeted the user.
+3. **CardKB `Fn + Backspace` font resizing & Fn-mode byte filtering**: Pressing `Fn + Backspace` (`0xEF` / `0x7F`, Del on CardKB) returned `0xEF` (`ï` in Latin-1), typing `ï` instead of toggling font size.
+4. **Unexpected session logout on non-critical changes**: Interactive resize actions and transient OS signals caused the shell session pump loop to exit and return to the login gate prematurely.
+
+### Decision
+
+1. **Immediate serial transport flushing.** `SerialTransport.send()` was updated to call `self._serial.flush()` immediately after writing frame bytes to the port, and a public `flush()` method was added to `SerialTransport`. In `TerminalBridge._paint`, `self._transport.flush()` is called after transmitting frame runs. This eliminates OS-level USB-serial packet buffering on Linux (CH340), ensuring that small single-character `DrawCells` commands are transmitted to the CYD display without delay.
+2. **Immediate post-login welcome banner & PTY read timeout.** In `TerminalBridge._spawn_shell`, the child process writes an ANSI color welcome banner (`Welcome back, <user>!\r\n\r\n`) to PTY stdout (`os.write(1, ...)`) immediately before `os.execvp("su", ...)`. In `_ShellSession.pump()`, the initial `_read_pty` call polls PTY output until the prompt arrives, capturing the welcome banner, PAM session startup, and bash prompt in the very first paint turn.
+3. **CardKB `Fn + Backspace` font resizing & Fn-mode byte filtering.** Pressing `Fn + Backspace` on the physical CardKB returns byte `0xEF` (which maps to Latin-1 `ï` when unhandled). `RESIZE_CHORDS` was updated to `frozenset({0x1D, 0x7F, 0x8B, 0x88, 0xEF})` so Fn+Backspace triggers font size cycling. In addition, `_resolve_key_payload` filters out any unmapped Fn-mode byte (`key >= 0x80` that is not an arrow key or resize chord), so Fn+symbol keypresses are safely ignored instead of typing `ï` or extended ASCII characters into the terminal.
+4. **Immediate full-panel clear on login and logout.** `_run_shell` now calls `self._clear_panel()` and resets `self._prev = None` both on session start (login) and in the `finally:` block (logout). This ensures a full-screen `DrawRect` background wipe clears the display on every state transition before rendering new text.
+5. **Single Enter key execution.** In `_KEY_TRANSLATIONS`, `0x0D` (Enter) was remapped to `b"\r"` (Carriage Return). Linux PTY `ICRNL` handles `\r` directly, allowing bash readline to process Enter and execute commands on a single keypress without requiring a second Enter.
+6. **Short prompt enforcement (`r# ` / `n$ `).** `install.sh` configures `/etc/profile.d/cyd_prompt.sh` and user `.bashrc` files to set `PS1='r# '` for `root` and `PS1='n$ '` for `neko`. The 3-character prompt saves precious horizontal columns on the 320x240 display and prevents prompt line-wrapping input lag.
+7. **Signal-robust PTY pump loop (`EINTR` & `EAGAIN` handling).** `_ShellSession._read_pty` was refactored into `_select_pty` and `_fetch_and_feed_pty`. Trapping `OSError` in `_select_pty`, `_fetch_and_feed_pty`, and `_drain_keys` explicitly checks `err.errno in (errno.EAGAIN, errno.EINTR)` and returns `True` (continuing the session). Signals like `SIGWINCH` (emitted by kernel on `TIOCSWINSZ` window resize) or `SIGCHLD` no longer raise uncaught `OSError` or trigger EOF session teardown, keeping the shell session active across window resizes and non-critical system events.
+
+### Consequences
+
+- Keypresses display characters on the CYD screen with zero transmission latency.
+- Enter key executes shell commands on a single press.
+- Users are greeted with an immediate `Welcome back, <user>!` banner and short `r# `/`n$ ` prompt upon login.
+- `Fn + Backspace` (`0xEF`) toggles font size instantly; all other Fn+symbol keys are ignored without printing `ï`.
+- Logging in and logging out immediately clear the display before rendering the new screen.
+- Resizing font size or receiving background OS signals stays in the active shell without logging out.

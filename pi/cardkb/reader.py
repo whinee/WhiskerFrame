@@ -23,10 +23,13 @@ from collections.abc import Iterator
 from types import TracebackType
 
 __all__ = [
+    "DEBOUNCE_WINDOW_S",
     "I2C_SLAVE",
     "NO_KEY",
+    "VALID_BYTES",
     "CardKB",
     "CardKBError",
+    "KeyFilter",
 ]
 
 I2C_SLAVE: int = 0x0703
@@ -34,6 +37,62 @@ I2C_SLAVE: int = 0x0703
 
 NO_KEY: int = 0x00
 """Byte the CardKB returns when no key press is pending."""
+
+VALID_BYTES: frozenset[int] = frozenset(
+    set(range(0x01, 0x20))  # C0 control bytes: Ctrl+letter, Tab(0x09), Enter(0x0D), Esc(0x1B), Backspace(0x08)
+    | set(range(0x20, 0x7F))  # printable ASCII (incl. Space 0x20 and all Sym-layer punctuation)
+    | {0x7F}  # Shift+Del (firmware emits 127)
+    | set(range(0x80, 0xB0))  # Fn layer: esc..space map to 128..175 (0x80-0xAF)
+    | {0xB4, 0xB5, 0xB6, 0xB7},  # arrows: left, up, down, right
+)
+"""Bytes the CardKB may legitimately emit; everything else is ghost/noise.
+
+Traced to M5Stack CardKB v1.1 firmware keymap (CardKeyBoard.ino, column order
+nor/shift/long_shift/sym/long_sym/fn/long_fn): nor + Sym layers stay in
+0x08-0x7E, Shift+Del emits 0x7F, the Fn layer emits 0x80-0xAF (128-175), and the
+four arrows emit 0xB4-0xB7. 0x00 is the idle read and 0xFF is the firmware's
+internal no-key sentinel; both are intentionally excluded.
+"""
+
+DEBOUNCE_WINDOW_S: float = 0.03
+"""Window within which an identical repeated raw byte is treated as rail ripple."""
+
+
+class KeyFilter:
+    r"""
+    Pure, hardware-free input filter for CardKB bytes.
+
+    Whitelists valid bytes (`VALID_BYTES`) and drops everything else (idle
+    ``0x00``, floating-bus ``0xFF``, stray high bytes). Also debounces: an
+    identical raw byte repeated within `DEBOUNCE_WINDOW_S` is rejected as rail
+    ripple, while a different byte always passes and the same byte passes again
+    once the window elapses. State is minimal (last byte + last time) so it is
+    deterministically testable with injected timestamps.
+    """
+
+    def __init__(self, window_s: float = DEBOUNCE_WINDOW_S) -> None:
+        self.window_s = window_s
+        self._last_byte: int | None = None
+        self._last_time: float = 0.0
+
+    def accept(self, byte: int, now: float) -> bool:
+        r"""
+        Return whether ``byte`` read at monotonic ``now`` should be yielded.
+
+        Args:
+        - byte (`int`): Raw byte read from the CardKB (``0..255``).
+        - now (`float`): Monotonic timestamp of the read, in seconds.
+
+        Returns:
+        `bool`: ``True`` to yield the byte, ``False`` to drop it.
+        """
+        if byte not in VALID_BYTES:
+            return False
+        if byte == self._last_byte and (now - self._last_time) < self.window_s:
+            return False
+        self._last_byte = byte
+        self._last_time = now
+        return True
 
 _REOPEN_BACKOFF_START_S: float = 0.5
 """Initial delay before re-opening the CardKB after a bus error."""
@@ -179,9 +238,10 @@ class CardKB:
         `int`: Each pressed key's ASCII byte (``1..255``).
 
         """
+        key_filter = KeyFilter()
         while self._fd is not None:
             key = self.read_key()
-            if key != NO_KEY:
+            if key_filter.accept(key, time.monotonic()):
                 yield key
             time.sleep(poll_interval_s)
 
@@ -209,6 +269,7 @@ class CardKB:
         `int`: Each pressed key's ASCII byte (``1..255``).
 
         """
+        key_filter = KeyFilter()
         backoff = _REOPEN_BACKOFF_START_S
         while True:
             try:
@@ -216,7 +277,7 @@ class CardKB:
                     self.open()
                 key = self.read_key()
                 backoff = _REOPEN_BACKOFF_START_S
-                if key != NO_KEY:
+                if key_filter.accept(key, time.monotonic()):
                     yield key
                 time.sleep(poll_interval_s)
             except CardKBError:

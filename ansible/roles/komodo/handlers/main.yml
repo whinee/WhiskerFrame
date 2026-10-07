@@ -1,0 +1,8 @@
+---
+# Handlers for the komodo role (TSK-04).
+
+- name: restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  listen: restart docker
