@@ -453,3 +453,27 @@ is unchanged on the Pi and Wi-Fi creds remain BLOCKED-ON-OPERATOR.
 - *Push to main directly.* Rejected — limits safe review; all agents use named `agent/<date>-<topic>` branches to segregate work.
 
 **Residual Risk.** Human gating on the first push and pre-push gitleaks reduces the blast radius to almost zero. The remaining risk relies on the `gh api` correctly verifying private repo status before data transmission.
+
+---
+
+## DEC-W14: Master Specification Domain Split & Content Updates
+
+**Date:** 2026-10-07
+
+**Problem:** `docs/specifications/README.md` became a bloated monolith containing architecture, wire-protocol framing, storage contracts, DAG orchestrator logic, and prioritized task tables. Cross-referencing was fragile and reviewing diffs for specific bounded domains (e.g., storage updates) was difficult out of sequence. Furthermore, the topology graph and tasks list held stale hardware assumptions from before the BTRFS move and hardware discovery.
+
+**Root Cause:**
+All subsystem invariants were initially appended into a single index file to satisfy the "Documentation Triad" contract without scaffolding multiple files. Over three waves of execution (Storage, Agent execution, Service deployment), the single surface area became unmaintainable.
+
+**Decision:**
+- **Split the spec:** `README.md` was partitioned into domain-specific files underneath `docs/specifications/`: `architecture.md`, `contracts/wire-protocol.md`, `terminal.md`, `display-color.md`, `storage-mount.md`, `orchestration.md`, `tasks.md`, `sops.md` and a stubbed `product-requirements.md` (DEC limits/rationale stay in `docs/dev/ai-decisions.md`).
+- **Retain markers:** Historic §1-§5 section markings were retained inside the new files as anchors, and referencing agent rules/playbooks were re-pointed to match the new file structure. (A pure move of all clauses).
+- **Corrected stale assumptions:** Updated the topology graph in `architecture.md` to properly map the unpowered micro-USB OTG Hub branching to the ZTE LTE Modem and RTL-SDR.
+- **Fixed storage examples:** Changed the snippet pattern in the DAG example (`orchestration.md`) and the wording in `architecture.md` / `tasks.md` from `ext4 / /dev/sda1` to `btrfs / /dev/disk/by-uuid/98bb87d2-...` conforming with the live DEC-W12 reality.
+- **Deduplicated tasks:** Consolidated the redundant dual tables in `tasks.md` into one single "Task Matrix" referencing the file artifacts and DEC status.
+
+**Alternatives Considered:**
+- Use a static site generator like MkDocs: Overkill. Decreases token efficiency and introduces build steps for markdown that should just be greppable text in the agent context layer.
+
+**Tradeoffs / Risk:**
+- External links to specific GitHub headers across the monolithic `README.md` are now broken. Countered by adding a clear reading order map in the new root `docs/specifications/README.md`.
