@@ -69,6 +69,27 @@ print('sent')
 
 (Replace `/dev/ttyUSB0` with the CYD port discovered in manual task 16.3.)
 
+## Inspect the boot splash in isolation
+
+`terminal.service` flashes the splash then immediately paints the login screen
+over it, so you can't check splash colours during normal boot. The daemon has a
+`--test-splash [SECONDS]` path (default 5s) that shows **only** the splash, then
+clears the panel and exits.
+
+The service holds `/dev/ttyUSB0` **exclusively**, so stop it first, run the test,
+then start it again:
+
+```sh
+ssh -i "${DEFAULT_KEY_PATH}" "${PI_USER}@${PI_HOST}" \
+    "systemctl stop terminal \
+     && cd /opt/cyd-display-link/pi && uv run python -m terminal.daemon --test-splash 8 ; \
+     systemctl start terminal"
+```
+
+If you forget to stop the service, the tool detects the busy port and prints the
+stop -> run -> start guidance instead of failing opaquely. It never stops or
+starts systemd services itself.
+
 ## Env check and the venv
 
 `scripts/pi_env_check.py` probes the Pi's **uv-managed venv** interpreter at
