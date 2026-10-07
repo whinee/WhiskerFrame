@@ -71,7 +71,7 @@ Before marking any node verified:
     specifically require the Kiro route. (Verified present in `/v1/models`:
     `auto/*` = `owned_by: combo`; `kr/auto` = `owned_by: kiro`.)
 
-## Documentation Triad
+## Documentation Triad + Handoff Journal
 
 Every completed wave updates all three files simultaneously:
 
@@ -79,8 +79,13 @@ Every completed wave updates all three files simultaneously:
 2. `docs/specifications/README.md` — The living Task Matrix and Task & Roadmap Registry.
 3. `docs/dev/changelog.md` — Chronological history of shipped functional changes.
 
+The Handoff Journal is a fourth artifact with a different role (session state, not architecture), exempt from the triad's lockstep rule:
+
+4. `docs/dev/ai-agent-handoff.md` — Write-ahead log of operator questions, answers, decisions, and INTENT/RESULT markers. Log BEFORE asking, BEFORE acting, and IMMEDIATELY on receiving an answer. Read it first on startup or takeover. Full protocol: `.agents/rules/document-architecture-sync.md`.
+
 ## Supervision Loop (Per Turn)
 
+0. Read the Handoff Journal; log intent before acting.
 1. Ground facts against the live system.
 2. Decompose intent into a dependency DAG.
 3. Fan out ready contracts to workers.

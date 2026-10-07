@@ -26,6 +26,10 @@ contract change) without the three doc edits in the same change.
    `.agents/rules/changelog.md` (Keep a Changelog headings, past-tense bullets,
    fully-qualified backticked symbols, the file touched).
 
+5. **`docs/dev/ai-recovery/<date>.md` — Recovery Reports.**
+   When an agent session crashes or is interrupted, the subsequent recovery process
+   logs its verification matrix, task statuses, and evidence here instead of a general dev log.
+
 ## Rules
 
 - **Lockstep, not isolation.** Do NOT dump rationale into a single isolated file
