@@ -472,3 +472,4 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/node,linux,macos,python,freecad,windows,platformio,visualstudiocode
 vault.yml
+docs/dev/spec-interview/
