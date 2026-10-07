@@ -520,3 +520,25 @@ LEARN MORE
 
 ### Answer (Agent)
 Noted. Escaped local  from the post-push checklist.
+
+## Q: 2026-10-07 - Specification Interview and Domain Split
+### Question/Action (Operator)
+* Interview mode: Read answered sections A and 1 from `docs/dev/spec-interview/0.md` without modifying that file. Add `docs/dev/spec-interview/` to `.gitignore`.
+* Generate followups for answered sections based on contradictions, vague points, and physical hardware limitations. Update the contradictions log.
+* Split `docs/specifications/README.md` into 9 domain-specific files (`architecture.md`, `contracts/wire-protocol.md`, `storage-mount.md`, etc.). Maintain original markers.
+* Repoint all documentation referencing the monolithic README to their exact new file locations.
+* Rectify stale claims (unpowered hub, LTE/SDR presence, btrfs switch on `/dev/disk/by-uuid` rather than `/dev/sda1` ext4) across the split specifications. Deduplicate tasks list.
+
+### Answer (Agent)
+**1. Spec Interview Processed:** 
+- Evaluated `docs/dev/spec-interview/0.md` sections block `A` and `1`. (Kept completely read-only). untracked and `.gitignore`d `docs/dev/spec-interview/`.
+- Generated `F-A.01` through `F-A.04` seeking parameters on customization limits, dev-only agent offline states, A5 physical dimensions, and RTC bus overhead.
+- Produced `docs/dev/spec-interview/contradictions.md` pointing out that pushing artists' art with a "no redistribution" license on a public repo breaks GitHub TOS, and exposing that debugging via PC USB power starves the LTE/SSD hub over the OTG connector. Note that the Pi Zero 2W's TUI is incompatible with manga reading expectations set in 1.03.
+- Produced `F-01` probing the painpoints to validate phone-replacements constraint.
+
+**2. Docs Split and Topology Corrections:** 
+- Clean-moved `docs/specifications/README.md` across 9 distinct artifacts while preserving `§X` anchor links under `docs/specifications/`. 
+- Successfully hunted and corrected dependencies over `.agents/rules/...`, `ai-decisions`, and `changelog`. Check showed zero dangling README hits.
+- Logged DEC-W14 with Triad documentation updates (`changelog.md` and `ai-decisions.md` committed natively on `agent/2026-10-07-initial`). 
+- Stale topology graph rewritten to include OTG ZTE LTE and SDR; task list fully deduplicated into `tasks.md`.
+
