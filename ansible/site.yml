@@ -28,4 +28,4 @@
     - role: network_automation
       vars:
         network_automation_apply: false
-      tags: [network]
+      tags: [network_automation, network]
