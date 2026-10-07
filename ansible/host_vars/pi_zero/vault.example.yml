@@ -1,0 +1,5 @@
+---
+# Example vault file for pi_zero. The real vault.yml is gitignored.
+vault_git_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1... operator@example"
+vault_netbird_setup_key: "00000000-0000-0000-0000-000000000000"
