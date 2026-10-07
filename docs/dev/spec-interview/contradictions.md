@@ -1,0 +1,4 @@
+# Contradictions in Spec Interview
+
+1. **A.12** vs Repo presence: "Core Code should have Mozilla Public License... Art by Cess_.2... No redistribution... All rights are retained by the artist." If the repository is public, pushing the `assets/images/cess` directory *is* redistribution. We either need to `.gitignore` that directory and remove it from git history, or the artist's license must explicitly allow public repository hosting.
+2. **A.13** vs Topology: "Power is unconnected. OTG to the hub... enabling gadget mode is important." Physics check: If Pi Power port is unconnected, and OTG port feeds the hub, the hub must backpower the Pi. But if you "Remove OTG, and connect RPI directly to programmer PC", the PC powers the Pi and acts as a USB host. Gadget mode works here, but means you have no hub, no SSD, and no LTE modem while debugging. Are you okay with the deck losing all its storage and networking while plugged into a PC?
