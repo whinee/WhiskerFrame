@@ -477,3 +477,26 @@ All subsystem invariants were initially appended into a single index file to sat
 
 **Tradeoffs / Risk:**
 - External links to specific GitHub headers across the monolithic `README.md` are now broken. Countered by adding a clear reading order map in the new root `docs/specifications/README.md`.
+
+---
+
+## DEC-W15: Product Requirements and Topology Refinements
+
+**Date:** 2026-10-07
+
+**Problem:** 
+The platform lacked user-facing capability specs, leading to vague tradeoffs. Physical constraints (RTC layout, debugging via USB) and hardware UX limits were underspecified.
+
+**Root Cause:**
+Initial specifications only codified agent and subsystem wire contracts. No requirements exist for offline operability, offline time-keeping, and the development/debugging workflow when the unpowered hub is disconnected.
+
+**Decision:**
+- **Product Requirements drafted:** Sourced from the operator interview (Sections A & 1), `REQ-*` entries codified in `docs/specifications/product-requirements.md`. Establishes limitations (A5 footprint, <65mm thickness, enclosed case against humidity).
+- **RTC added:** A DS3231 RTC module is appended to the system topology to prevent off-grid time drift from breaking TLS and git syncs. 
+- **Debug workflow pivoted to UART:** The plan to debug directly via USB Gadget Mode was rejected due to physics limits (connecting the Pi OTG direct to PC drops the SSD and LTE hub). UART serial via GPIO header is accepted as the fallback for network-headless debugging when connecting to new Wi-Fi networks.
+
+**Alternatives Considered:**
+- USB Gadget Mode: Rejected because disconnecting the OTG hub removes the `/mnt/250GB-SSD` primary drive, freezing any file operations or logs.
+
+**Tradeoffs / Risk:**
+- Adding an RTC uses additional physical space within the tight (<65mm) depth constraint. UART debugging requires opening the case or provisioning a breakout port.
