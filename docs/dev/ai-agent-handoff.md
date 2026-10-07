@@ -561,3 +561,13 @@ Noted. Escaped local  from the post-push checklist.
 * Stripped out statement-only observations.
 * Included explicit arithmetic for the "physics-check" on manga reading over a 11.5 KB/s UART.
 * Deduped `contradictions.md` to just the Asset Redistribution and OTG Power issues.
+
+## Q: 2026-10-07 - Followup Answers Processed & Triad Drafted
+### Question/Action (Operator)
+* Interview mode: Provided answers to `0-followups-A.md` and `0-followups-01.md`.
+
+### Answer (Agent)
+* Drafted `REQ-CAP` (offline wiki/code, text-only, no local LLMs), `REQ-UX` (A5 footprint, <65mm thickness, no push notifications), and `REQ-HW` (RTC required, enclosed weather-sealed case) into `docs/specifications/product-requirements.md`.
+* Logged DEC-W15: accepted UART over USB Gadget mode for recovery debugging, since separating the OTG hub destroys the running BTRFS mount.
+* Note: Unresolved Contradiction 1 (`assets/images/cess` Artist Licensing vs Open-source repository goals) still needs attention before public launch.
+
