@@ -108,17 +108,27 @@ class SerialTransport:
 
     def send(self, frame: bytes) -> None:
         """
-        Write pre-framed bytes to the serial port.
+        Write pre-framed bytes to the serial port and flush immediately.
 
         Transmit an already-framed ``[SOF][LEN][OPCODE][PAYLOAD][CRC8]`` byte
-        sequence (as produced by :func:`whiskerframe.protocol.serialize` or
-        :func:`whiskerframe.protocol.frame`) to the CYD over serial.
+        sequence to the CYD over serial and flush the underlying serial port so
+        transmission to the hardware is never delayed.
 
         Args:
         - frame (`bytes`): Complete framed byte sequence to transmit.
 
         """
         self._serial.write(frame)
+        self._serial.flush()
+
+    def flush(self) -> None:
+        """
+        Flush the underlying serial port buffer.
+
+        Ensure all written bytes are transmitted over the physical USB serial link immediately.
+
+        """
+        self._serial.flush()
 
     def send_command(self, command: DrawText | DrawRect) -> None:
         """
