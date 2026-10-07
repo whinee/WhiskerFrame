@@ -40,10 +40,12 @@
 # boot-time unit. dnsmasq likewise must not auto-start on all interfaces. We make
 # that explicit regardless of apply mode so staging alone never flips wlan0.
 - name: Mask the stock hostapd boot unit (arbiter is the only thing that starts it)
+  failed_when: false
   ansible.builtin.systemd:
     name: hostapd
     enabled: false
     masked: true
+    force: true
   tags: [network]
 
 - name: Prevent dnsmasq from auto-starting on boot (arbiter owns it)

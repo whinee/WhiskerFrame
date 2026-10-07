@@ -437,3 +437,19 @@ the pre-switch known-good capture, and the systemd-timer rollback that restores
 NetworkManager unless the connectivity sentinel confirms the new link. The first
 real apply must still happen with the operator present. Until then wlan0 ownership
 is unchanged on the Pi and Wi-Fi creds remain BLOCKED-ON-OPERATOR.
+
+## DEC-W14 — Safe-Push Cadence and Wrapper Policy
+
+**Problem.** Autonomous agents need the ability to push commits to a remote as a safety checkpoint before risky actions (like reboots or wiping disks) and at session completion, so work isn't stranded locally if the session crashes. However, raw `git push` is inherently risky: it can leak secrets, force-push over human work, push to incorrect remotes, or expose a private repo.
+
+**Decision.** Operator approved an exception to the "never push" policy, transitioning to a strict **human-gated "safe-push" cadence**:
+- **Wrapper Enforced:** All autonomous pushes must flow through `~/.config/agent-policy/bin/agent-push`. Raw `git push` is explicitly denied.
+- **Constraints Checked (All Required):** `agent/*` branch prefix, remote URL allowlist, strict fast-forward (no `--force`), confirmed private repository status via `gh api`, clean working directory, `gitleaks` scan over all outgoing commits, and a `$ANSIBLE_VAULT` signature presence check inside any staged `vault.yml`.
+- **First Push Gate:** The very first push on a branch requires an explicit human `OK` after receiving a review summary (including any IPs/hostnames/emails).
+- **Cadence Rules:** Pushes happen automatically (after the first gate) at verified wave boundaries, as checkpoints before disruptive actions, or at session end. Maximum push frequency is ~15 min unless triggered by a checkpoint.
+
+**Rejected Alternatives.**
+- *Raw `git push` with only git hooks.* Rejected — easy to bypass (e.g. `--no-verify`) and risks pushing dirty working trees or pushing to wrong remotes without explicit programmatic barriers.
+- *Push to main directly.* Rejected — limits safe review; all agents use named `agent/<date>-<topic>` branches to segregate work.
+
+**Residual Risk.** Human gating on the first push and pre-push gitleaks reduces the blast radius to almost zero. The remaining risk relies on the `gh api` correctly verifying private repo status before data transmission.

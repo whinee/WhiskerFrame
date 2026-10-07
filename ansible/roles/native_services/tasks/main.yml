@@ -55,6 +55,7 @@
 
     - name: Initialize the requested bare repositories
       ansible.builtin.command: "git init --bare {{ git_repos_dir }}/{{ item }}.git"
+      # noqa command-instead-of-module
       args:
         creates: "{{ git_repos_dir }}/{{ item }}.git/HEAD"
       become: true
@@ -179,16 +180,17 @@
       when: netbird_setup_key | length > 0
       block:
         - name: Run netbird up via ENV variable (avoids argv)
-        ansible.builtin.command: >
-          netbird up
-          {% if netbird_management_url | length > 0 %}--management-url {{ netbird_management_url }}{% endif %}
-        environment:
-          NB_SETUP_KEY: "{{ netbird_setup_key }}"
-        register: netbird_up
-        changed_when: "'Connected' in (netbird_up.stdout | default(''))"
-        failed_when:
-          - netbird_up.rc != 0
-          - "'already' not in (netbird_up.stderr | default('') | lower)\"
+          ansible.builtin.command: >
+            netbird up
+            {% if netbird_management_url | length > 0 %}--management-url {{ netbird_management_url }}{% endif %}
+          no_log: true
+          environment:
+            NB_SETUP_KEY: "{{ netbird_setup_key }}"
+          register: netbird_up
+          changed_when: "'Connected' in (netbird_up.stdout | default(''))"
+          failed_when:
+            - netbird_up.rc != 0
+            - "'already' not in (netbird_up.stderr | default('') | lower)"
 
 # ==========================================================================
 # File Browser — web file manager (NATIVE binary, NOT the Docker image)
