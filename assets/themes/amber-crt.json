@@ -1,0 +1,38 @@
+{
+  "name": "amber-crt",
+  "description": "Amber phosphor CRT look: warm amber text on near-black. All fg/cursor/accent pairs >= 4.5:1 (AA) on bg; most AAA.",
+  "background_hex": "#0a0a06",
+  "bg": "0x0840",
+  "fg": "0xFD88",
+  "cursor": "0xFE6D",
+  "accent_pink": "0xFE8F",
+  "accent_purple": "0xFDEB",
+  "accent_blue": "0xFED1",
+  "ansi": [
+    "0x8BCA",
+    "0xFB47",
+    "0xCD00",
+    "0xFD88",
+    "0xFC68",
+    "0xFCE9",
+    "0xFE6D",
+    "0xF718",
+    "0xAC8C",
+    "0xFC6B",
+    "0xE5E7",
+    "0xFE6D",
+    "0xFD4B",
+    "0xFDED",
+    "0xFF13",
+    "0xFFBC"
+  ],
+  "contrast": {
+    "fg_on_bg": 11.13,
+    "cursor_on_bg": 13.59,
+    "accent_pink_on_bg": 11.9,
+    "accent_purple_on_bg": 10.6,
+    "accent_blue_on_bg": 12.4,
+    "ansi_min_on_bg": 4.72
+  },
+  "_notes": "Keys match pi/terminal/theme.py terminal.theme schema. ANSI index 0 (black) raised to #8a7a55 so even the dimmest slot clears AA. fg #ffb347, bg #0a0a06."
+}

@@ -1,0 +1,15 @@
+# TEMPLATE systemd .mount unit. install_mount.py renders this with the real
+# values from .whiskerframe.yaml and writes the escaped-name unit on the Pi.
+# NEVER substitute real UUIDs/paths into a committed copy of this file: the
+# @...@ tokens are placeholders only.
+[Unit]
+Description=External storage (@STORAGE_MOUNT_POINT@)
+
+[Mount]
+What=/dev/disk/by-uuid/@STORAGE_UUID@
+Where=@STORAGE_MOUNT_POINT@
+Type=@STORAGE_FSTYPE@
+Options=@STORAGE_OPTIONS@
+
+[Install]
+WantedBy=multi-user.target

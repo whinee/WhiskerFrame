@@ -1,0 +1,13 @@
+[Unit]
+Description=Network arbiter — AP-vs-client decision for the single radio (wlan0)
+# Decide after iwd has had a chance to come up.
+After=iwd.service network-pre.target
+Wants=iwd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/network-arbiter
+# Small box — cap the arbiter's own footprint.
+MemoryMax={{ arbiter_mem_max }}
+# Field-robustness: a bad tick must not wedge; just exit and let the timer retry.
+TimeoutStartSec=120

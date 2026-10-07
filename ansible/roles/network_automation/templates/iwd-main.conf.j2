@@ -1,0 +1,18 @@
+# iwd daemon config — managed by Ansible (network_automation role). DO NOT edit
+# by hand; changes are overwritten on the next run.
+#
+# iwd OWNS wlan0 for client association. EnableNetworkConfiguration lets iwd do
+# its own DHCP so no separate client (NetworkManager/dhcpcd) is needed.
+
+[General]
+EnableNetworkConfiguration={{ iwd_enable_network_configuration | lower }}
+# Keep the single radio in a known state; AP mode is handled out-of-band by the
+# arbiter (hostapd), not by iwd.
+
+[Network]
+NameResolvingService={{ iwd_name_resolving_service }}
+
+[Scan]
+# Allow scanning while disconnected so the arbiter can learn whether any known
+# network is in range before deciding AP vs client.
+DisablePeriodicScan=false

@@ -58,6 +58,19 @@ version:
 splash:
     uv run python scripts/convert_splash.py
 
+# Rsync the Pi runtime (whiskerframe/, pi/, scripts/) to the deploy root on the Pi.
+# Infra params (PI_HOST/PI_USER/DEFAULT_KEY_PATH) come from .env (set dotenv-load).
+[unix]
+sync:
+    rsync -a --exclude-from=pi/deploy-exclude.txt -e "ssh -i $DEFAULT_KEY_PATH" ./ "$PI_USER@$PI_HOST:/opt/cyd-display-link/"
+
+# Install Galaxy collections, then run the Ansible playbook against the Pi.
+# Controller runs via uvx (no global ansible); Pi-side python still goes through uv.
+[unix]
+deploy: sync
+    cd ansible && uvx --from ansible-core ansible-galaxy collection install -r requirements.yml
+    cd ansible && uvx --from ansible-core ansible-playbook -i inventory.ini site.yml
+
 # Generate documentation
 [unix]
 docs:

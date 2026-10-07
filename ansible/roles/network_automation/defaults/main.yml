@@ -1,0 +1,114 @@
+---
+# Defaults for the network_automation role (TSK-05).
+#
+# Offline network automation for a Raspberry Pi Zero 2W: ONE radio (wlan0),
+# headless, remote. iwd OWNS wlan0 for client association; hostapd + dnsmasq
+# provide an AP fallback that binds wlan0 ONLY when no known network is found.
+# The two modes are MUTUALLY EXCLUSIVE — a single radio can never be AP + client
+# at the same time. The arbiter (see templates/) is the single owner of that
+# decision.
+#
+# wlan0 OWNER DECISION (orchestrator): iwd replaces NetworkManager +
+# wpa_supplicant on wlan0. Those two managers are stopped/disabled/masked so they
+# can never fight iwd over the radio.
+#
+# ====================================================================
+# SAFETY GATE — READ BEFORE SETTING THIS TRUE
+# ====================================================================
+# This box is HEADLESS and REMOTE. Switching wlan0 away from the live
+# NetworkManager/wpa_supplicant setup can cut SSH and lock the operator out with
+# no console. For that reason the DISRUPTIVE tasks (masking NM/wpa_supplicant,
+# installing the arbiter, flipping the radio owner) are gated behind
+# `network_automation_apply`. It DEFAULTS TO FALSE so a plain
+# `ansible-playbook site.yml` STAGES this role (installs packages + writes config
+# files that do not take effect) WITHOUT cutting the network.
+#
+# Even when set true, the role ARMS a rollback (see lockout guard below): unless
+# a connectivity sentinel is confirmed within the timeout, the Pi auto-restores
+# NetworkManager and SSH comes back. Apply ONLY with the rollback understood.
+network_automation_apply: false
+
+# Regulatory domain. Carried over from the Pi's current wpa_supplicant
+# country=PH. Wrong country code can make the radio refuse channels or break AP
+# mode, so this is explicit.
+network_country_code: "PH"
+
+# --- iwd client manager ---------------------------------------------------
+# iwd does its own DHCP (EnableNetworkConfiguration=true) so we do not need a
+# separate dhcpcd/NetworkManager client. systemd-resolved handles DNS if present;
+# otherwise iwd writes /etc/resolv.conf directly.
+iwd_enable_network_configuration: true
+# NameResolvingService: "systemd" when systemd-resolved runs, else "resolvconf".
+# "systemd" is the safe default on modern Raspberry Pi OS (Bookworm/Trixie).
+iwd_name_resolving_service: "systemd"
+iwd_mem_max: "40M"
+
+# --- iwd client network profiles -----------------------------------------
+# BLOCKED-ON-OPERATOR: credentialed enrollment.
+# Leave EMPTY by default. Real PSKs / 802.1X creds come from VAULTED host_vars,
+# never committed here. Each entry renders an iwd profile under /var/lib/iwd/.
+#
+# Each dict supports:
+#   name:       SSID (used verbatim as the iwd profile basename)
+#   type:       "psk" | "8021x" | "open"
+#   psk:        (psk)   the WPA2 passphrase — VAULT THIS
+#   hidden:     (opt)   true for hidden SSIDs
+#   autoconnect:(opt)   false to disable auto-association (default true)
+#   # 802.1X (enterprise) fields — all optional, pass what the network needs:
+#   eap_method:            e.g. "PEAP", "TLS", "TTLS"
+#   identity:              outer/anonymous or full identity
+#   phase2:                e.g. "MSCHAPV2"
+#   password:              (8021x password methods) — VAULT THIS
+#   ca_cert:               path on the Pi to the CA cert
+#   client_cert:           path on the Pi to the client cert (EAP-TLS)
+#   client_key:            path on the Pi to the client key (EAP-TLS)
+#   client_key_passphrase: VAULT THIS
+#
+# Captive portals: open networks ASSOCIATE at the iwd layer, but a captive
+# portal sign-in is a BROWSER-layer step iwd cannot do headlessly — note only.
+wifi_networks: []
+
+# --- AP fallback (hostapd + dnsmasq) --------------------------------------
+# Only brought up by the arbiter when NO known client network is found. Binds
+# wlan0 with a static IP and serves DHCP so the operator can reach the box.
+ap_ssid: "whiskerframe-ap"
+# AP passphrase. Override via VAULTED host_vars — this placeholder is NOT a
+# usable secret and MUST be changed before relying on AP mode. 8..63 chars.
+ap_passphrase: "CHANGE-ME-whiskerframe"
+ap_channel: 6
+ap_hw_mode: "g"
+# Static IPv4 the AP assigns to wlan0 and the DHCP range it hands out.
+ap_interface: "wlan0"
+ap_static_ip: "192.168.4.1"
+ap_netmask: "255.255.255.0"
+ap_dhcp_range_start: "192.168.4.10"
+ap_dhcp_range_end: "192.168.4.100"
+ap_dhcp_lease_time: "12h"
+
+hostapd_mem_max: "40M"
+dnsmasq_mem_max: "40M"
+
+# --- Arbiter (single owner of AP-vs-client decision) ----------------------
+# How long to wait for iwd to associate to a known network before declaring
+# "no known network" and falling back to AP mode.
+arbiter_client_timeout_secs: 45
+# How often the arbiter re-evaluates (systemd timer cadence).
+arbiter_poll_interval: "2min"
+arbiter_mem_max: "32M"
+
+# --- Lockout guard (MANDATORY on this headless remote box) ----------------
+# Before the disruptive switch, capture the known-good network state and arm a
+# rollback. Unless the sentinel below exists within the window, the rollback
+# RESTORES NetworkManager (unmask+enable+start) and stops iwd so SSH returns.
+lockout_rollback_minutes: 10
+# Sentinel the operator (or a reachability handler) creates to DISARM rollback.
+lockout_sentinel_path: "/run/network_automation/connectivity-confirmed"
+# Where the captured known-good state is saved.
+lockout_state_dir: "/var/lib/network_automation"
+
+# --- NetworkManager masking risk note -------------------------------------
+# This is a headless WIFI box: wlan0 is the only link that matters, so masking
+# NetworkManager wholesale is acceptable here. If this host EVER grows an
+# NM-managed eth0/USB-gadget link that must stay up, DO NOT mask NM — set this
+# false and manage only wpa_supplicant. Confirmed single-radio by orchestrator.
+mask_networkmanager: true

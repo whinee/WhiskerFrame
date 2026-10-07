@@ -1,0 +1,38 @@
+{
+  "name": "ice-cyan",
+  "description": "Cool ice palette: pale cyan text on dark navy. All fg/cursor/accent pairs >= 4.5:1 (AA) on bg; most AAA.",
+  "background_hex": "#06121a",
+  "bg": "0x0083",
+  "fg": "0xAF9F",
+  "cursor": "0x7F1F",
+  "accent_pink": "0x9F5F",
+  "accent_purple": "0xAE5F",
+  "accent_blue": "0x8EBF",
+  "ansi": [
+    "0x6C53",
+    "0xFBCF",
+    "0x4F16",
+    "0xFF11",
+    "0x7DDF",
+    "0x9EDF",
+    "0x5F5F",
+    "0xDFBF",
+    "0x8D57",
+    "0xFCD3",
+    "0x7F99",
+    "0xFF55",
+    "0xA67F",
+    "0xBF5F",
+    "0x8FBF",
+    "0xFFFF"
+  ],
+  "contrast": {
+    "fg_on_bg": 15.06,
+    "cursor_on_bg": 12.63,
+    "accent_pink_on_bg": 13.6,
+    "accent_purple_on_bg": 12.3,
+    "accent_blue_on_bg": 13.1,
+    "ansi_min_on_bg": 5.14
+  },
+  "_notes": "Keys match pi/terminal/theme.py terminal.theme schema. ANSI index 0 (black) raised to #6a8a98 so even the dimmest slot clears AA. fg #aef0ff, bg #06121a."
+}

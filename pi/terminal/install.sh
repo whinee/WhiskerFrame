@@ -35,7 +35,31 @@ fi
 echo "Installing ${UNIT_DST} ..."
 install -m 0644 "${UNIT_SRC}" "${UNIT_DST}"
 
-# 2. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
+# 2. System-wide short shell prompt (r# for root, n$ for neko).
+echo "Configuring short CYD shell prompt in /etc/profile.d/cyd_prompt.sh ..."
+cat << 'EOF' > /etc/profile.d/cyd_prompt.sh
+if [ "$USER" = "root" ]; then
+    export PS1='r# '
+elif [ "$USER" = "neko" ]; then
+    export PS1='n$ '
+else
+    export PS1='${USER:0:1}\$ '
+fi
+EOF
+chmod 0644 /etc/profile.d/cyd_prompt.sh
+
+for u_home in "/root" "/home/neko"; do
+    if [ -d "$u_home" ]; then
+        user_name="$(basename "$u_home")"
+        [ "$user_name" = "root" ] && p_str="r# " || p_str="${user_name:0:1}\$ "
+        bashrc_file="${u_home}/.bashrc"
+        if [ -f "$bashrc_file" ]; then
+            grep -q "CYD_SHORT_PROMPT" "$bashrc_file" || echo "export PS1='${p_str}' # CYD_SHORT_PROMPT" >> "$bashrc_file"
+        fi
+    fi
+done
+
+# 3. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
 echo "Reloading systemd and starting the service ..."
 systemctl daemon-reload
 systemctl enable terminal.service

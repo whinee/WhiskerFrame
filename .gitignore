@@ -46,7 +46,6 @@ cyd_factory_backup.bin
 
 # User-defined Unignored Files
 !.env.example
-!.whiskerframe.yaml
 
 ################################################################################
 #                                 GITIGNORE.IO                                 #
@@ -472,6 +471,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/node,linux,macos,python,freecad,windows,platformio,visualstudiocode
-
-# Cyberdeck: live config is per-user/gitignored; example is the committed template
-!.whiskerframe.example.yaml
+vault.yml

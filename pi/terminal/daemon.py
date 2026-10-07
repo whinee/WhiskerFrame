@@ -18,7 +18,9 @@ down the daemon. No interactive prompts run in this path.
 
 from __future__ import annotations
 
+import argparse
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,7 @@ __all__ = [
     "log",
     "main",
     "run",
+    "test_splash",
 ]
 
 
@@ -239,15 +242,110 @@ def run(config: BridgeConfig) -> int:
     return 0
 
 
-def main() -> int:
+def test_splash(config: BridgeConfig, seconds: float) -> int:
     r"""
-    Entry point: load configuration and run the terminal bridge.
+    Show ONLY the boot splash for ``seconds``, then leave a cleared panel.
+
+    An on-device inspection path for verifying splash colours in isolation: open
+    the serial transport, blit the configured splash (reusing
+    :func:`.splash.show_splash`), hold, then send a full-panel background clear so
+    the panel is never left mid-splash. No login/shell is rendered;
+    ``terminal.service`` resumes ownership of the panel when restarted.
+
+    The serial port is held EXCLUSIVELY by ``terminal.service`` while it runs, so
+    this cannot run alongside it. A busy/missing port is reported with the stop ->
+    run -> start guidance rather than failing opaquely; this tool never
+    stops/starts systemd services itself.
+
+    Args:
+    - config (`BridgeConfig`): The resolved bridge configuration (same as the daemon).
+    - seconds (`float`): How long to hold the splash before clearing.
+
+    Returns:
+    `int`: Process exit code (``0`` on success, non-zero on a port/config problem).
+
+    """
+    if not config.splash_rgb565:
+        log("ERROR", "no splash configured (terminal.splash.rgb565 unset or disabled)")
+        return 2
+    if seconds <= 0:
+        log("ERROR", f"--test-splash SECONDS must be > 0 (got {seconds})")
+        return 2
+
+    from whiskerframe.models import DrawRect
+    from whiskerframe.protocol import serialize
+    from whiskerframe.terminal import DISPLAY_HEIGHT, DISPLAY_WIDTH
+    from whiskerframe.transport import SerialTransport
+
+    from .splash import show_splash
+
+    try:
+        transport = SerialTransport(config.serial_port, config.baud)
+    except OSError as err:
+        log("ERROR", f"cannot open {config.serial_port}: {err}")
+        log(
+            "ERROR",
+            "the port is held exclusively by terminal.service. Stop it first: "
+            "`systemctl stop terminal`, run this, then `systemctl start terminal`.",
+        )
+        return 1
+
+    try:
+        log("INFO", f"showing splash on {config.serial_port} for {seconds:g}s")
+        show_splash(transport, config.splash_rgb565)
+        time.sleep(seconds)
+        clear = DrawRect(
+            x=0,
+            y=0,
+            w=DISPLAY_WIDTH,
+            h=DISPLAY_HEIGHT,
+            color=config.theme.bg,
+            filled=True,
+        )
+        transport.send(serialize(clear))
+        transport.flush()
+        log("INFO", "panel cleared; restart terminal.service to resume")
+    finally:
+        transport.close()
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    r"""
+    Entry point: parse args, then run the daemon or the splash-test path.
+
+    With no ``--test-splash`` flag this loads configuration and runs the terminal
+    bridge daemon exactly as before. With ``--test-splash [SECONDS]`` it instead
+    shows only the boot splash for the given duration (default 5s) and exits,
+    leaving a cleared panel -- an on-device way to inspect splash colours.
+
+    Args:
+    - argv (`list[str] | None`, optional): Argument vector (defaults to ``sys.argv``).
 
     Returns:
     `int`: Process exit code.
 
     """
-    return run(load_bridge_config())
+    parser = argparse.ArgumentParser(prog="terminal.daemon")
+    parser.add_argument(
+        "--test-splash",
+        nargs="?",
+        type=float,
+        const=5.0,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "show ONLY the boot splash for SECONDS (default 5), then clear the "
+            "panel and exit. Requires terminal.service stopped (it holds the port "
+            "exclusively): `systemctl stop terminal` first, then `systemctl start "
+            "terminal` after."
+        ),
+    )
+    args = parser.parse_args(argv)
+    config = load_bridge_config()
+    if args.test_splash is not None:
+        return test_splash(config, args.test_splash)
+    return run(config)
 
 
 if __name__ == "__main__":

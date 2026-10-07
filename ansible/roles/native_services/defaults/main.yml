@@ -1,0 +1,60 @@
+---
+# Defaults for the native_services role.
+#
+# Lightweight self-hosted services as NATIVE binaries + systemd units (NO Docker
+# — the DB-backed container stack OOM-thrashed the 416MB Pi; see DEC-W10). Each
+# service carries a systemd MemoryMax= ceiling so no single service can run the
+# box into a thrash spiral. Data/state lives on the ext4 SSD to spare the SD card.
+
+ssd_mount_point: /mnt/storage
+
+# --- Git: plain bare repositories served over SSH (no web forge) ----------
+# Deliberately NOT Forgejo/Gitea — a plain git+SSH remote is the lightest
+# possible self-hosted git: no web server, no database, no daemon beyond sshd,
+# which is already running. Repos are bare dirs under a dedicated git account.
+git_enabled: true
+git_user: git
+git_home: "{{ ssd_mount_point }}/git"      # home + repo root on the SSD
+git_repos_dir: "{{ git_home }}/repos"      # bare repos live here (<name>.git)
+# Operator SSH public keys authorized to push/pull (fill in group_vars/host_vars).
+# Example: ["ssh-ed25519 AAAA... operator@dev"]
+git_authorized_keys: []
+# Bare repos to create up front (each becomes <git_repos_dir>/<name>.git).
+git_initial_repos: []
+
+# --- Syncthing (file sync) ------------------------------------------------
+syncthing_enabled: true
+# Run as the human account, NOT root (syncthing refuses to run as root by
+# default, and user data should be owned by the user). ansible_user is the SSH
+# login (root here), so default explicitly to the on-device user.
+syncthing_user: "neko"
+syncthing_data_dir: "{{ ssd_mount_point }}/syncthing"
+# Bind the GUI to loopback by default; reach it over NetBird/SSH tunnel, not the
+# open LAN. Override to 0.0.0.0:8384 only behind the NetBird overlay.
+syncthing_gui_address: "127.0.0.1:8384"
+syncthing_mem_max: "200M"
+
+# --- NetBird (WireGuard-based remote access overlay) ----------------------
+netbird_enabled: true
+# Setup key for unattended enrollment. KEEP OUT OF GIT — pass via
+# group_vars/host_vars (vaulted) or an env lookup. Empty = enroll manually later.
+netbird_setup_key: ""
+# Self-hosted management URL, if running your own NetBird control plane. Empty =
+# use the default NetBird SaaS management endpoint.
+netbird_management_url: ""
+netbird_mem_max: "150M"
+
+# --- File Browser (web file manager — native binary, NOT the Docker image) -
+filebrowser_enabled: true
+# Run as the human account, not root (least privilege for a network file server).
+filebrowser_user: "neko"
+# Pin a concrete release — no :latest, reproducible installs (reproducible-build).
+filebrowser_version: "v2.31.2"
+filebrowser_bin: /usr/local/bin/filebrowser
+filebrowser_root: "{{ ssd_mount_point }}"          # directory tree it serves
+filebrowser_db: "{{ ssd_mount_point }}/filebrowser/filebrowser.db"
+filebrowser_config_dir: "{{ ssd_mount_point }}/filebrowser"
+# Bind to loopback; reach it over the NetBird overlay or an SSH tunnel.
+filebrowser_address: "127.0.0.1"
+filebrowser_port: 8080
+filebrowser_mem_max: "128M"

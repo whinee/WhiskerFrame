@@ -1,0 +1,271 @@
+---
+# Layered memory safety for the Pi Zero 2W: BTRFS SSD swapfile (low-priority
+# backstop), zram (high-priority compressed RAM swap), low swappiness, earlyoom.
+#
+# INVARIANT: swap NEVER lands on the SD card. The swapfile is created on the
+# BTRFS @swap subvolume of the SSD only, and the role fails fast if that mount
+# is not btrfs or not live.
+#
+# BTRFS swapfile hard rules (DEC-W12 ext4->btrfs reformat):
+#   - A btrfs swapfile MUST be nodatacow, uncompressed, and never snapshotted.
+#     We dedicate the @swap subvolume to it, mounted at swap_subvol_mount with
+#     plain `noatime,subvol=@swap` — NOT the compress=zstd @data opts.
+#   - `btrfs filesystem mkswapfile` (btrfs-progs >= 6.1) prepares the file with
+#     nodatacow + correct preallocation automatically. The old ext4 recipe
+#     (fallocate + mkswap + plain fstab src=file) is WRONG on btrfs and will be
+#     refused/corrupted, so it is gone.
+
+# --- Toolchain ------------------------------------------------------------
+# btrfs-progs provides `btrfs filesystem mkswapfile`; required before any
+# swapfile work below.
+- name: Install btrfs-progs (provides btrfs filesystem mkswapfile)
+  ansible.builtin.apt:
+    name: btrfs-progs
+    state: present
+    update_cache: true
+
+# --- Preconditions --------------------------------------------------------
+
+- name: Disable SD-card zram writeback timer (protects SD wear)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+    masked: true
+  loop:
+    - rpi-zram-writeback.timer
+    - rpi-zram-writeback.service
+  failed_when: false
+
+- name: Purge SD-card swap file /var/swap (prevents regression)
+  ansible.builtin.file:
+    path: /var/swap
+    state: absent
+- name: Assert the SSD is mounted (swapfile backstop must not touch the SD card)
+  ansible.builtin.assert:
+    that:
+      - ssd_mount_point in (ansible_mounts | map(attribute='mount') | list)
+    fail_msg: >-
+      SSD not mounted at {{ ssd_mount_point }} — refusing to create a swapfile.
+      Swap must never be placed on the SD card. Bring up the storage mount first.
+    success_msg: "SSD confirmed at {{ ssd_mount_point }} — safe to host the swapfile."
+
+- name: Confirm the SSD mount is not the SD card root/boot filesystem
+  ansible.builtin.assert:
+    that:
+      - ssd_mount_point not in ['/', '/boot', '/boot/firmware']
+      - swap_subvol_mount not in ['/', '/boot', '/boot/firmware']
+    fail_msg: "Refusing: a configured swap/SSD path resolves to a boot/root path."
+
+- name: Confirm the SSD mount is a BTRFS filesystem (mkswapfile + @swap require it)
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_mounts | selectattr('mount', 'equalto', ssd_mount_point)
+         | map(attribute='fstype') | first) == 'btrfs'
+    fail_msg: >-
+      {{ ssd_mount_point }} is not btrfs — this role is btrfs-specific
+      (mkswapfile on the @swap subvolume). Reformat/mount per DEC-W12 first.
+    success_msg: "SSD at {{ ssd_mount_point }} is btrfs — proceeding."
+
+# --- BTRFS @swap subvolume (uncompressed, nodatacow home for the swapfile) --
+# Mount @swap at its own path with plain noatime (NO compress, NO @data opts)
+# so the swapfile path exists at boot before swapon, and so the kernel accepts
+# the swapfile. nofail: a missing SSD must never block boot.
+- name: Create the @swap subvolume mountpoint
+  ansible.builtin.file:
+    path: "{{ swap_subvol_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Mount the @swap subvolume (noatime, no compression) and persist to fstab
+  ansible.posix.mount:
+    path: "{{ swap_subvol_mount }}"
+    src: "UUID={{ ssd_device_uuid }}"
+    fstype: btrfs
+    opts: "noatime,subvol={{ swap_subvol }},nofail"
+    state: mounted
+
+# --- BTRFS SSD swapfile (low-priority backstop) ---------------------------
+- name: Check for an existing swapfile
+  ansible.builtin.stat:
+    path: "{{ swapfile_path }}"
+  register: swapfile_stat
+
+# Resize path: a wrong-sized file is deactivated and removed so mkswapfile can
+# rebuild it. swapoff may fail if it was never active — tolerate that.
+- name: Deactivate the swapfile before resizing (if size differs)
+  ansible.builtin.command: "swapoff {{ swapfile_path }}"
+  register: swapoff_resize
+  changed_when: swapoff_resize.rc == 0
+  failed_when: false
+  when:
+    - swapfile_stat.stat.exists
+    - (swapfile_stat.stat.size | default(0)) != (swapfile_size_mb * 1024 * 1024)
+
+- name: Remove a wrong-sized swapfile so it can be recreated
+  ansible.builtin.file:
+    path: "{{ swapfile_path }}"
+    state: absent
+  when:
+    - swapfile_stat.stat.exists
+    - (swapfile_stat.stat.size | default(0)) != (swapfile_size_mb * 1024 * 1024)
+
+# Belt-and-suspenders: mark the containing dir nodatacow BEFORE the file is
+# created so any new file inherits +C. mkswapfile also sets nodatacow on the
+# file itself, but setting it on the dir first guards manual/legacy recreation.
+# chattr +C on an already-flagged dir is a no-op, so this is idempotent.
+- name: Ensure the swap subvolume dir is nodatacow (chattr +C, belt-and-suspenders)
+  ansible.builtin.command: "chattr +C {{ swap_subvol_mount }}"
+  register: swap_dir_nocow
+  changed_when: false
+  failed_when: false
+
+# btrfs filesystem mkswapfile (btrfs-progs >= 6.1): sets nodatacow + correct
+# preallocation + runs mkswap-equivalent prep in one shot. `creates:` makes a
+# second run a no-op. --uuid clear avoids baking a stale UUID into the file.
+- name: Create the swapfile on the @swap subvolume (btrfs mkswapfile, nodatacow)
+  ansible.builtin.command: >-
+    btrfs filesystem mkswapfile --size {{ swapfile_size_mb }}M --uuid clear
+    {{ swapfile_path }}
+  args:
+    creates: "{{ swapfile_path }}"
+  register: swapfile_mkswapfile
+
+- name: Lock down swapfile permissions (root-only, 0600)
+  ansible.builtin.file:
+    path: "{{ swapfile_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+# fstab entry: low priority (pri), nofail so a missing SSD never blocks boot.
+# NOTE: this must be ordered after the @swap mount above (also nofail) so the
+# swapfile path exists at boot before swapon.
+- name: Persist the swapfile in fstab (low priority, nofail)
+  ansible.posix.mount:
+    path: none
+    src: "{{ swapfile_path }}"
+    fstype: swap
+    opts: "sw,pri={{ swapfile_priority }},nofail"
+    state: present
+
+- name: Activate the swapfile now (low priority)
+  ansible.builtin.command: "swapon --priority {{ swapfile_priority }} {{ swapfile_path }}"
+  register: swapon_file
+  changed_when: swapon_file.rc == 0
+  # An already-active swapfile reports rc 255 with "Device or resource busy" (or
+  # "already"). Both mean the backstop is live — only treat other errors as fatal.
+  failed_when:
+    - swapon_file.rc != 0
+    - "'already' not in (swapon_file.stderr | lower)"
+    - "'busy' not in (swapon_file.stderr | lower)"
+
+# --- zram (high-priority compressed RAM swap) -----------------------------
+# Many Raspberry Pi OS images already ship a zram swap device managed by the
+# systemd zram-generator (`systemd-zram-setup@zram0.service`, aka rpi-swap). That
+# device is already zstd + high priority. Installing zram-tools on top creates a
+# SECOND manager that fights over the busy /dev/zram0 and fails to start
+# ("Device or resource busy" / "zram0 is mounted; will not make swapspace").
+#
+# So: detect an existing active zram swap first. If one exists, ADOPT it (leave
+# the native manager in charge) and only enforce priority via sysctl/verify. Only
+# when NO zram swap is present do we install and configure zram-tools ourselves.
+- name: Detect any already-active zram swap device
+  ansible.builtin.command: "swapon --show=NAME,TYPE --noheadings"
+  register: swap_devices
+  changed_when: false
+
+- name: Record whether a zram swap is already managed by the system
+  ansible.builtin.set_fact:
+    zram_already_active: "{{ 'zram' in swap_devices.stdout }}"
+
+- name: Report the zram provider decision
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Native zram swap already active (systemd-zram-setup/rpi-swap) — adopting it, '
+         ~ 'NOT installing zram-tools to avoid a two-manager conflict.'
+         if zram_already_active
+         else 'No zram swap present — installing and configuring zram-tools.' }}
+
+- name: Set up zram via zram-tools (only when no zram swap already exists)
+  when: not zram_already_active
+  block:
+    - name: Install zram-tools
+      ansible.builtin.apt:
+        name: zram-tools
+        state: present
+        update_cache: true
+
+    - name: Configure zram (algorithm, size, priority)
+      ansible.builtin.lineinfile:
+        path: /etc/default/zramswap
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        create: true
+        mode: "0644"
+      loop:
+        - { regexp: '^#?ALGO=', line: "ALGO={{ zram_algorithm }}" }
+        - { regexp: '^#?PERCENT=', line: "PERCENT={{ zram_percent }}" }
+        - { regexp: '^#?PRIORITY=', line: "PRIORITY={{ zram_priority }}" }
+      notify: restart zramswap
+
+    - name: Enable and start zramswap
+      ansible.builtin.systemd:
+        name: zramswap
+        enabled: true
+        state: started
+
+# --- Kernel VM tuning (sysctl) --------------------------------------------
+- name: Tune the VM for a RAM-starved host with slow swap
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-cyberdeck-memory.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  loop:
+    - { name: "vm.swappiness", value: "{{ vm_swappiness }}" }
+    - { name: "vm.vfs_cache_pressure", value: "{{ vm_vfs_cache_pressure }}" }
+
+# --- earlyoom (kill before thrash) ----------------------------------------
+- name: Install earlyoom
+  ansible.builtin.apt:
+    name: earlyoom
+    state: present
+    update_cache: true
+
+- name: Configure earlyoom thresholds and process preferences
+  ansible.builtin.lineinfile:
+    path: /etc/default/earlyoom
+    regexp: '^EARLYOOM_ARGS='
+    line: >-
+      EARLYOOM_ARGS="-m {{ earlyoom_mem_percent }} -s {{ earlyoom_swap_percent }}
+      -r 60
+      --prefer '{{ earlyoom_prefer_regex }}'
+      --avoid '{{ earlyoom_avoid_regex }}'"
+    create: true
+    mode: "0644"
+  notify: restart earlyoom
+
+- name: Enable and start earlyoom
+  ansible.builtin.systemd:
+    name: earlyoom
+    enabled: true
+    state: started
+
+- name: Apply pending restarts
+  ansible.builtin.meta: flush_handlers
+
+# --- Verification ---------------------------------------------------------
+- name: Collect active swap devices and priorities
+  ansible.builtin.command: "swapon --show=NAME,TYPE,PRIO --noheadings"
+  register: swap_show
+  changed_when: false
+
+- name: Show the active swap layout (zram should outrank the SSD swapfile)
+  ansible.builtin.debug:
+    msg: "{{ swap_show.stdout_lines }}"
