@@ -1,12 +1,14 @@
 r"""
-PC-side splash converter: image -> letterboxed 320x240 little-endian RGB565 blob.
+PC-side splash converter: image -> letterboxed 320x240 big-endian RGB565 blob.
 
 Convert the configured boot-splash image (``terminal.splash.image`` in
 ``.whiskerframe.yaml``) into the raw pixel blob the Pi daemon streams to the CYD
 without ever running an imaging library on the deck. The image is resized to fit
 the 320x240 panel preserving aspect ratio, letterboxed onto a black canvas, and
-emitted as little-endian RGB565 (two bytes per pixel, high byte last) to match the
-firmware ``DRAW_IMAGE`` pixel contract. A full frame is ``320 * 240 * 2 =
+emitted as big-endian RGB565 (two bytes per pixel, high byte first) to match the
+firmware ``DRAW_IMAGE`` blit: ``tft.pushImage`` runs with TFT_eSPI's default
+``_swapBytes == false``, so it pushes the pixel bytes to the panel unchanged and
+the buffer must be high-byte-first. A full frame is ``320 * 240 * 2 =
 153600`` bytes.
 
 This script runs only on the programmer workstation (it imports Pillow, the
@@ -45,12 +47,27 @@ _RGB565_BYTES: int = PANEL_WIDTH * PANEL_HEIGHT * 2
 """Expected size of a full-frame RGB565 blob (two bytes per pixel)."""
 
 
-def _pack_rgb565_le(red: int, green: int, blue: int) -> bytes:
+def _pack_rgb565_be(red: int, green: int, blue: int) -> bytes:
     """
-    Pack one 8-bit RGB triple into a little-endian RGB565 pixel.
+    Pack one 8-bit RGB triple into a big-endian RGB565 pixel.
 
     Quantize the channels to 5/6/5 bits, combine them into a 16-bit value, and
-    emit it low byte first to match the firmware's little-endian pixel reads.
+    emit it high byte first to match the firmware's DRAW_IMAGE blit path.
+
+    The firmware renders DRAW_IMAGE via ``tft.pushImage(..., const uint16_t*)``
+    with TFT_eSPI's default ``_swapBytes == false`` (it never calls
+    ``setSwapBytes``), so ``pushImage`` pushes the pixel bytes to the panel
+    unchanged. That means the on-wire buffer must already be big-endian RGB565
+    (high byte first). This differs from DRAW_TEXT/DRAW_RECT/DRAW_CELLS, whose
+    colours go through ``fillRect``/``setTextColor`` as a ``uint16_t`` that
+    TFT_eSPI byteswaps internally (``tft_Write_16S``) — which is why text renders
+    correctly while a little-endian image buffer did not.
+
+    No XOR is applied: ``tft.invertDisplay(true)`` is a panel-level (ILI9341
+    INVON) setting that inverts every pixel equally, text and image alike. Since
+    true-colour text renders correctly with it on, true-colour image pixels do
+    too once the byte order matches. The previous ``value ^= 0xFFFF`` was chasing
+    the byte-order symptom and only produced a differently-wrong colour.
 
     Args:
     - red (`int`): Red channel in ``[0, 255]``.
@@ -58,11 +75,11 @@ def _pack_rgb565_le(red: int, green: int, blue: int) -> bytes:
     - blue (`int`): Blue channel in ``[0, 255]``.
 
     Returns:
-    `bytes`: The two little-endian RGB565 bytes for the pixel.
+    `bytes`: The two big-endian RGB565 bytes for the pixel.
 
     """
     value = ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3)
-    return bytes((value & 0xFF, (value >> 8) & 0xFF))
+    return bytes(((value >> 8) & 0xFF, value & 0xFF))
 
 
 def _letterbox(image: ImageModule.Image) -> ImageModule.Image:
@@ -93,10 +110,10 @@ def _letterbox(image: ImageModule.Image) -> ImageModule.Image:
 
 def convert_image_to_rgb565(image_path: Path) -> bytes:
     """
-    Convert an image file into a letterboxed 320x240 little-endian RGB565 blob.
+    Convert an image file into a letterboxed 320x240 big-endian RGB565 blob.
 
     Open the image, letterbox it onto the panel, and pack every pixel into
-    little-endian RGB565. The result is always exactly ``153600`` bytes.
+    big-endian RGB565. The result is always exactly ``153600`` bytes.
 
     Args:
     - image_path (`Path`): Path to the source image file.
@@ -105,7 +122,7 @@ def convert_image_to_rgb565(image_path: Path) -> bytes:
     - `FileNotFoundError`: If ``image_path`` does not exist.
 
     Returns:
-    `bytes`: The ``320 * 240 * 2`` little-endian RGB565 bytes.
+    `bytes`: The ``320 * 240 * 2`` big-endian RGB565 bytes.
 
     """
     from PIL import Image
@@ -120,7 +137,7 @@ def convert_image_to_rgb565(image_path: Path) -> bytes:
     for y in range(PANEL_HEIGHT):
         for x in range(PANEL_WIDTH):
             red, green, blue = pixels[x, y]  # type: ignore[index, misc]
-            out += _pack_rgb565_le(red, green, blue)
+            out += _pack_rgb565_be(red, green, blue)
     return bytes(out)
 
 
@@ -155,7 +172,7 @@ def main() -> int:
     Convert the configured splash image and write the ``.rgb565`` artifact.
 
     Resolve the configured paths, convert the source image to the panel-sized
-    little-endian RGB565 blob, and write it to the configured output path,
+    big-endian RGB565 blob, and write it to the configured output path,
     reporting the byte count. Idempotent: the same input yields the same output.
 
     Returns:
