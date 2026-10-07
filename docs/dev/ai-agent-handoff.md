@@ -425,3 +425,28 @@ RESULT: [2026-10-07] All orchestration corrections completed:
 - Moved current branch away from `main` to `agent/2026-10-07-initial`. `main` reset to `origin/main`.
 - Independent testing of `agent-push` wrapper passed all refusal and fast-forward assertions.
 - Working tree fully clean (zero dirty files).
+
+### Q-011 | 2026-10-07 | OPEN
+Blocked: Awaiting explicit OK to run first push, and a decision on whether to push `vault.yml` or gitignore it.
+Options: [1] Yes, push vault.yml OR [2] Gitignore vault.yml (Recommended).  Recommended default: Gitignore.
+Applies to: First-push orchestration gate and vault version control.
+Answer: <awaiting>
+Reply sent: Presented First-Push Review, Pi idle soak stats, and vault.yml question. Waiting for OK.
+
+INTENT: [2026-10-07] Executing orchestration push-prep wave:
+1. Verify GitHub deploy key setup and `IdentitiesOnly yes` config.
+2. Rewrite agent-push repo-privacy validation to use unauthenticated curl (drops `gh` dependency). Rerun tests.
+3. Validate ansible-vault variables and syntax check.
+4. Compile the First-Push Review (diff scan for emails, IPs, creds; commit list).
+5. Retrieve Pi 10-minute idle-soak metrics.
+6. Stop and present operator fork for PUSH explicit OK.
+
+## Q: 2026-10-07 - Public-Readiness and Push Preparation
+### Question/Action (Operator)
+* Operator decision: The repo stays PUBLIC. The wrapper's privacy refusal was a wrong assumption. Modify the wrapper to check against an operator-set `expected_visibility`.
+* Perform a full public-readiness audit over every outgoing commit (not just net diff) for IPs, hostnames, SSIDs, emails, absolute paths with user names, tokens, credentials, host_vars contents, commit author identity, and personal details in handoff/decisions docs.
+* Remove `ansible/host_vars/*/vault.yml` from the outgoing history before pushing. Public ciphertext lives forever. Add dummy examples and update gitignore.
+* Pre-approval to push if audit ONLY finds RFC1918 IPs, absolute paths with the username, and the GitHub noreply email.
+
+### Answer (Agent)
+[Will update with results of the history rewrite, public readiness audit, and safe-push status]
