@@ -276,3 +276,79 @@ Flashing is done ON THE PI with esptool in the Pi venv (CYD serial is on the Pi)
 - Chronological changes: `docs/dev/changelog.md` (0.1.0 Unreleased).
 
 Good luck. Keep it reproducible, keep it field-robust, never brick the sealed deck.
+
+
+---
+
+## 2026-10-06 23:01 UTC — Lead Orchestrator (Antigravity) — Session Initialization and Roadmap Triage
+
+### (a) What I have done
+- Grounded system facts against the live hardware via SSH (`root@10.0.0.212`):
+  - Target host online: load 0.03, memory 416 MB (203 MB available), swap 415 MB zram.
+  - Core services verified active: `terminal.service`, `battery-monitor.service`, `log2ram.service`.
+  - Storage verified: `/mnt/250GB-SSD` mounted on `/dev/sda1` (`ext4`, 229 GB free, 1% used).
+- Audited current specification registry:
+  - TSK-01 (CYD terminal login), TSK-02/TSK-02a (SSD ext4 reformat & systemd mount), TSK-03 (SD card wear reduction via log2ram & journald on SSD), and TSK-06 (named theme switching) are verified and operational on hardware.
+  - TSK-04 (Komodo 2.0 container stack) was shelved due to hardware infeasibility (Pi Zero 2W 416MB RAM OOM-thrash).
+  - TSK-07 (native lightweight services + memory safety) and TSK-05 (offline network automation) are queued in the roadmap.
+
+### (b) The problem the developer is facing right now
+None. The cyberdeck host is healthy, and all deployed services are running cleanly.
+
+### (c) What still needs to be done (MOST IMPORTANT)
+- [ ] TSK-07: Implement native self-hosted services and host memory-safety layer on Pi host (no Docker):
+  - Memory safety: 512MB SSD swapfile (`/mnt/250GB-SSD/swapfile`, `chmod 600`, priority 10), zram swap retained at priority 100, `vm.swappiness` ~15, `earlyoom` installation, and per-unit `MemoryMax=` limits to prevent OOM panics.
+  - Native services: Git bare repos over SSH, Netbird client for remote overlay networking, Syncthing binary service, File Browser binary service.
+  - Files involved: `ansible/roles/memory_safety/`, `ansible/roles/native_services/`, systemd unit templates.
+  - Acceptance criteria: earlyoom running, swapfile active, services operational within the 416MB RAM envelope.
+- [ ] TSK-05: Offline network automation:
+  - Configure `iwd` client mode with reserved static IP (`10.0.0.212`) when known networks are present.
+  - Configure self-hosted fallback AP (`hostapd` + `dnsmasq`) when disconnected.
+  - Acceptance criteria: Pi auto-connects to known Wi-Fi; raises independent AP when unreachable.
+- [ ] SSH bootstrap & static IP documentation:
+  - Complete documented procedures for manual SSH bootstrap, security considerations (`PermitRootLogin` / `GatewayPorts`), and static IP configuration in `docs/dev/manual-hardware-steps.md`.
+
+### (d) What I told the user to do next
+Presented active triage fork:
+- Option A: Begin TSK-07 (Memory safety layer: SSD swapfile, earlyoom, vm.swappiness tuning).
+- Option B: Begin TSK-05 (Offline network automation: iwd client + AP fallback).
+- Or provide custom instruction.
+
+## Operator Question / Answer Log (Standing Rule)
+
+**ID**: Q-001
+**Timestamp**: 2026-10-07 (Recovery)
+**Status**: ANSWERED
+**Question**: (Recovered state instructions)
+**Answer**:
+A: git public key (public only):
+`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK24+yUzdeVn5HXlCQ8sKE+ahrR4URaiV2YNrBVLrEGu lyra@cezanne-shiroi-neko`
+Create `ansible/host_vars/cyberdeck/vault.yml` yourself, encrypt it. Generate a random vault password to `~/.config/whiskerframe/` (chmod 600, outside repo, gitignored). Report the path only, never print it. Don't ask me to create files.
+
+**ID**: Q-002
+**Timestamp**: 2026-10-07 (Recovery)
+**Status**: ANSWERED
+**Question**: (Swap adjustment approval)
+**Answer**:
+B: yes. Remove SD-card swap (/var/swap, rpi-zram-writeback.timer), zram-only drop-in, guard in memory_safety against regression. Authorized to delete /var/swap (overrides the destructive gate for that file only).
+
+**ID**: Q-003
+**Timestamp**: 2026-10-07 (Recovery)
+**Status**: ANSWERED
+**Question**: (Boot config approval)
+**Answer**:
+C: yes. Boot to console, disable desktop autologin, mask packagekit. First PROVE the UART terminal (terminal.service/serial getty) doesn't depend on the desktop session. Deck is sealed: arm a rollback timer before reboot, keep SSH up, reboot-test, confirm UART comes up, re-measure idle RAM/swap.
+
+**ID**: Q-004
+**Timestamp**: 2026-10-07 (Recovery)
+**Status**: ANSWERED
+**Question**: (Commit policy setup)
+**Answer**:
+SAFE COMMIT LAYER: Create a global pre-commit hook that hard-fails on gitleaks (fail-closed if missing), vault.yml not starting with $ANSIBLE_VAULT, staged private keys, and staged .env/*.pem/*.key/vault-pass files. Pre-push hook refuses unless ALLOW_PUSH is set. Create `~/.config/agent-policy/safe-autocommit/SKILL.md` (atomic commits, no -a, local only, feature branch), symlinked into skills dirs. Always-on pointers in ~/.claude/CLAUDE.md, ~/.gemini/AGENTS.md, ~/.kiro/steering/safe-autocommit.md.
+
+**ID**: Q-005
+**Timestamp**: 2026-10-07 (Recovery)
+**Status**: ANSWERED
+**Question**: (Wizard setup)
+**Answer**:
+WIZARD: CLI generating/filling .whiskerframe.yaml and .env. Idempotent, diff before write, --dry-run, non-interactive flags/env mode. Dev host execution. SSH keys: file path or pasted, multiple allowed, REJECT private keys. Validate via ssh-keygen -l -f. Dedupe. Secrets (Netbird, tokens) never in yaml/.env -> ansible-vault or refuse. Stack: Python/uv, Pydantic, typer + questionary/rich. Tests incl. fake private key rejection.
