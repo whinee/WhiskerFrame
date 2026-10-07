@@ -43,7 +43,7 @@ ANSIBLE_HOST_KEY_CHECKING=False uvx --from ansible-core ansible-playbook -i inve
   deterministic and RAM overhead low on the Pi Zero 2W.
 - **No destructive storage here:** the SSD reformat (TSK-02a) and mount
   enable are **deliberately absent** from every playbook. They stay
-  human-gated per spec §2.4 / `docs/dev/ai-decisions.md` DEC-W7. No role
+  human-gated per spec docs/specifications/storage-mount.md (§2.4) / `docs/dev/ai-decisions.md` DEC-W7. No role
   formats, mounts, or wipes anything.
 
 ## Layout

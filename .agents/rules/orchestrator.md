@@ -21,7 +21,7 @@ Lead-orchestrator contract for coordinating worker agents against the Pi Zero 2W
 
 ## DAG Task Routing & Execution
 
-Decompose operator intent into a directed acyclic graph (DAG) of typed sub-tasks. Fan out independent nodes in parallel; serialize dependent edges. Issue typed task contracts (spec §3.1) to worker agents:
+Decompose operator intent into a directed acyclic graph (DAG) of typed sub-tasks. Fan out independent nodes in parallel; serialize dependent edges. Issue typed task contracts (docs/specifications/orchestration.md §3.1) to worker agents:
 
 ```json
 {
@@ -48,7 +48,7 @@ Before marking any node verified:
 * Run system assertions (`findmnt`, `systemctl is-active`, byte-length and CRC checks).
 * Worker self-reports are unverified until tested. Failed gates re-route back to the worker with actionable diffs.
 
-## Circuit Breakers (Spec §3.2)
+## Circuit Breakers (docs/specifications/orchestration.md (Spec §3.2))
 
 * **Sealed Deck:** Never assume physical access; flash the ESP32 only via the Pi venv `esptool`.
 * **Serial Exclusivity:** Always stop `terminal.service` before running serial probes or flash writes.
