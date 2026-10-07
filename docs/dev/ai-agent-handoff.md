@@ -571,3 +571,12 @@ Noted. Escaped local  from the post-push checklist.
 * Logged DEC-W15: accepted UART over USB Gadget mode for recovery debugging, since separating the OTG hub destroys the running BTRFS mount.
 * Note: Unresolved Contradiction 1 (`assets/images/cess` Artist Licensing vs Open-source repository goals) still needs attention before public launch.
 
+
+## Q: 2026-10-07 - Contradiction Formatting Fix
+### Question/Action (Operator)
+* Reformat `docs/dev/spec-interview/contradictions.md` into the formal C-XX schema holding an index board, OPEN and RESOLVED sections.
+* Formalize C-01 (Cess Art Terms) to BLOCKER severity since art in a public repository causes TOS violations if unrestricted redistribution is denied.
+* Formalize C-02 (Hardware debug constraint) to MEDIUM severity outlining the USB Gadget / storage trade-off options.
+
+### Answer (Agent)
+* File formatted according to spec parameters. Waiting for answers under the newly added C-01 and C-02 `> A:` blocks.
