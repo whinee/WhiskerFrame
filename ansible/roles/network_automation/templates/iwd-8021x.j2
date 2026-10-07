@@ -1,0 +1,36 @@
+# iwd 802.1X (enterprise) network profile for "{{ item.name }}" — managed by
+# Ansible. Rendered to /var/lib/iwd/{{ item.name }}.8021x. All credentials and
+# cert paths come from VAULTED host_vars; nothing secret is committed here.
+
+[Security]
+{% if item.eap_method is defined %}
+EAP-Method={{ item.eap_method }}
+{% endif %}
+{% if item.identity is defined %}
+EAP-Identity={{ item.identity }}
+{% endif %}
+{% if item.phase2 is defined %}
+EAP-{{ item.eap_method | default('PEAP') }}-Phase2-Method={{ item.phase2 }}
+{% endif %}
+{% if item.password is defined %}
+EAP-{{ item.eap_method | default('PEAP') }}-Phase2-Identity={{ item.identity | default('') }}
+EAP-{{ item.eap_method | default('PEAP') }}-Phase2-Password={{ item.password }}
+{% endif %}
+{% if item.ca_cert is defined %}
+EAP-{{ item.eap_method | default('PEAP') }}-CACert={{ item.ca_cert }}
+{% endif %}
+{% if item.client_cert is defined %}
+EAP-TLS-ClientCert={{ item.client_cert }}
+{% endif %}
+{% if item.client_key is defined %}
+EAP-TLS-ClientKey={{ item.client_key }}
+{% endif %}
+{% if item.client_key_passphrase is defined %}
+EAP-TLS-ClientKeyPassphrase={{ item.client_key_passphrase }}
+{% endif %}
+
+[Settings]
+AutoConnect={{ (item.autoconnect | default(true)) | lower }}
+{% if item.hidden | default(false) %}
+Hidden=true
+{% endif %}

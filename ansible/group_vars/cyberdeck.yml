@@ -1,0 +1,22 @@
+---
+# Group vars for the cyberdeck (Pi Zero 2W). Non-secret deploy constants only;
+# host/user/key/venv come from the gitignored .env via env lookups.
+
+# rsync/deploy root on the Pi (matches the existing bootstrap.sh convention).
+deploy_root: /opt/cyd-display-link
+
+# Path to the Pi's uv-managed target venv. Sourced from .env so it stays in one
+# place. Every Python invocation on the Pi goes through `{{ venv_path }}/bin/uv`.
+venv_path: "{{ lookup('env', 'DEFAULT_VENV_PATH') }}"
+
+# The uv binary on the Pi (installed by bootstrap.sh to ~/.local/bin). It is NOT
+# inside the venv — `uv run` from the pi project dir resolves the venv itself.
+uv_bin: /root/.local/bin/uv
+
+# Single source of truth for storage: read the committed .whiskerframe.yaml the
+# same file scripts/config.py:load_yaml_config reads. Avoids hardcoding the mount
+# point in two places (the /mnt/storage vs /mnt/250GB-SSD drift). Controller-side
+# parse — no Pi python needed.
+whiskerframe_cfg: "{{ lookup('file', inventory_dir + '/../.whiskerframe.yaml') | from_yaml }}"
+ssd_mount_point: "{{ whiskerframe_cfg.storage.mount_point }}"
+ssd_device_uuid: "{{ whiskerframe_cfg.storage.device_uuid }}"

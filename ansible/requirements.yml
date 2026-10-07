@@ -1,0 +1,13 @@
+---
+# Ansible Galaxy collection dependencies for the cyberdeck playbooks.
+# Install on the dev host with:
+#   uvx --from ansible-core ansible-galaxy collection install -r requirements.yml
+# (uv manages the controller; Galaxy collections are Ansible plugins, not Python
+# packages, so uv cannot replace this step.)
+collections:
+  - name: community.docker   # docker_compose_v2 (TSK-04 Komodo stack)
+    version: ">=3.10.0"
+  - name: community.general  # ini_file (TSK-03 journald.conf)
+    version: ">=8.0.0"
+  - name: ansible.posix      # mount (fstab swap), sysctl (vm tuning)
+    version: ">=1.5.0"
