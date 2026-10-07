@@ -1,7 +1,9 @@
-# Cyberdeck / whiskerframe project configuration (committed, non-secret).
+# Cyberdeck / whiskerframe project configuration (TEMPLATE).
 #
-# Hardware facts and component lists that must stay reproducible live here rather
-# than hard-coded in scripts. Loaded via scripts/config.py.
+# Copy to .whiskerframe.yaml and edit for your host before running:
+#     cp .whiskerframe.example.yaml .whiskerframe.yaml
+# The live .whiskerframe.yaml is gitignored, so `git pull` never clobbers it.
+# Host-specific values below are placeholders (CHANGEME) -- set them for your build.
 
 # Components verified on the Pi host by scripts/pi_env_check.py (Req 6.2).
 components:
@@ -13,7 +15,7 @@ components:
 ups:
   chip: INA219
   i2c_bus: 1                 # /dev/i2c-1 (Pi GPIO 2/3, physical pins 3/5)
-  i2c_address: 0x41          # detected on this build (i2cdetect -y 1 -> 41)
+  i2c_address: 0x41          # detect with: i2cdetect -y 1
   cells_series: 3            # 3S pack (3x 18650)
   voltage_full: 12.6         # volts at 100%
   voltage_empty: 9.0         # volts at 0%
@@ -21,28 +23,33 @@ ups:
   low_battery_percent: 15    # daemon warning threshold
   critical_percent: 5        # daemon critical/shutdown threshold
   poll_interval_seconds: 10  # battery daemon poll cadence (seconds)
-  auto_shutdown: true        # power off cleanly at critical_percent (5%) to protect the pack
+  auto_shutdown: true        # power off cleanly at critical_percent to protect the pack
   power_supply_name: cyberdeck_ups  # POWER_SUPPLY_NAME published to the kernel class
 
 # M5Stack CardKB keyboard (I2C0 on Pi GPIO 0/1, physical pins 27/28).
 cardkb:
   i2c_bus: 0                 # /dev/i2c-0 (enabled via dtparam=i2c_vc + dtoverlay=i2c0,pins_0_1)
-  i2c_address: 0x5f          # detected (i2cdetect -y 0 -> 5f)
+  i2c_address: 0x5f          # detect with: i2cdetect -y 0
   poll_interval_seconds: 0.05  # key scan cadence
 
 # CYD display link serial device.
 cyd:
   usb_id: "1a86:7523"        # CH340 USB-serial bridge
-  port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+  port: CHANGEME             # e.g. /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
   baud: 115200
 
 # CYD terminal: piiiiink theme (WCAG AA on the blurple bg), geometry, login, splash.
 terminal:
-  serial_port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+  serial_port: CHANGEME      # same device as cyd.port above
   baud: 115200
   font_size: 2               # 1->53x30, 2->26x15, 3->17x10 (resizable at runtime)
   keyframe_interval_seconds: 30  # periodic full repaint (recover from CYD reset)
   shell: /bin/bash
+  # Optional: load a named JSON theme from assets/themes/ (name with or without
+  # the .json suffix). When set and loadable it OVERRIDES the inline `theme`
+  # block below; a missing/invalid file falls back to `theme`, then to the
+  # baked-in a11y palette. Shipped themes: piiiiink-a11y, amber-crt, ice-cyan.
+  # theme_file: piiiiink-a11y
   # piiiiink terminal palette as RGB565 (all >= 4.5:1 contrast on bg).
   theme:
     bg: 0x18C5             # blurple background  (#191a28)
@@ -75,11 +82,22 @@ terminal:
   login:
     enabled: true
     users:                 # selectable at the login screen; auth is real system auth
-      - root
-      - neko
+      - CHANGEME           # e.g. a non-root system username; add one per selectable user
     password_mask: "*"
   # Boot splash image shown while the Pi comes up (before the login screen).
   splash:
     enabled: true
-    image: assets/images/cess/Lyra and Dreanne Christmas Night Market.png
-    rgb565: assets/images/cess/Lyra and Dreanne Christmas Night Market.rgb565  # pre-converted on the programmer; the Pi only reads this
+    image: CHANGEME        # path to a PNG under assets/images/
+    rgb565: CHANGEME       # pre-converted .rgb565 of the splash; the Pi only reads this
+
+# External storage (e.g. a USB SSD). Disabled by default; pi/storage/install_mount.py
+# reads this block and generates the systemd .mount unit (run --dry-run first).
+storage:
+  enabled: false
+  mount_point: "/mnt/storage"
+  device_uuid: ""          # from `blkid` on the Pi; empty => generator is a no-op
+  fstype: "btrfs"          # btrfs: data subvolume mounted with compress=zstd + noatime
+  subvol: "@data"          # (btrfs only) data subvolume mounted at mount_point
+  compress: "zstd"         # (btrfs only) transparent compression for the data subvolume
+  # The swap subvolume (@swap) is handled separately by the memory-safety layer:
+  # nodatacow, uncompressed, never snapshotted. Do NOT mount swap with these opts.
