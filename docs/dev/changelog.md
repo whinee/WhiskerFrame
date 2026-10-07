@@ -232,3 +232,4 @@ This software uses [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.h
 ## 0.0.0
 
 Initial Release of the package
+- Docs Triad (DEC-W14): Split the monolithic `docs/specifications/README.md` into domain-specific files (`architecture.md`, `contracts/wire-protocol.md`, `storage-mount.md`, etc.). Re-linked all reference documents and corrected stale topology limits (added LTE/SDR on the USB hub) and old `/dev/sda1` ext4 examples that did not mirror the DEC-W12 btrfs reality. Deduplicated task matrix list. Added initial reading map index.
