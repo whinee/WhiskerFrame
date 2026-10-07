@@ -542,3 +542,12 @@ Noted. Escaped local  from the post-push checklist.
 - Logged DEC-W14 with Triad documentation updates (`changelog.md` and `ai-decisions.md` committed natively on `agent/2026-10-07-initial`). 
 - Stale topology graph rewritten to include OTG ZTE LTE and SDR; task list fully deduplicated into `tasks.md`.
 
+
+## Q: 2026-10-07 - Section 1 Second Pass
+### Question/Action (Operator)
+* Interview mode: Read the newly completed answers from Section 1 (1.07 to 1.13) in `docs/dev/spec-interview/0.md` and generate followups/contradiction logs.
+
+### Answer (Agent)
+**Section 1 Processed:**
+- Generated `F-01.03` through `F-01.07` covering hardware input (CardKB validation), thickness limits, open-case humidity concerns (PH climate constraint), and anti-boredom platform goals.
+- Logged a **contradiction (Item 3)**: the desire to "open source everything about this project" (1.08) directly collides with retaining the `assets/images/cess` artistic assets that carry a "No redistribution" clause (A.12).
