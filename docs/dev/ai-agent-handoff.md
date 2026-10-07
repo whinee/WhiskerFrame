@@ -591,3 +591,14 @@ Noted. Escaped local  from the post-push checklist.
 - **C-01 (Artwork terms vs Open Source)**: Resolved. Artist granted non-commercial exception explicitly. Drafted `REQ-LIC-01` to authorize public distribution inside the repository.
 - **C-02 (OTG Power/Data Constraints)**: Resolved. Confirmed that Gadget mode requires pulling the OTG port out of Host mode, completely separating the SSD/LTE hub (even if the hub is powered). Accepted option (c) (GPIO UART recovery debugging), keeping the layout consistent with DEC-W15.
 - Both entries moved to `## Resolved` in `contradictions.md`, index updated.
+
+## Q: 2026-10-08 - Section 2 Processed
+### Question/Action (Operator)
+* Interview mode: Processed answered Section 2 from `0.md`. 
+* Generate `0-followups-02.md`, detect physics/conflict checks, draft REQ mappings.
+
+### Answer (Agent)
+* Drafted `REQ-PF-01` through `REQ-PF-12` in `docs/specifications/product-requirements.md` (covering daily drive, text-only web/gaming/discord, on-demand dashboard chord over always-on, audio support and local bash/python tools).
+* Created `0-followups-02.md` containing `F-02.01` to `F-02.04` probing the physics of streaming audio, Discord TOS bans, ALSA/Pulse audio CPU stealing, and retro-gaming over a 10fps terminal interface.
+* Generated `C-03` contradiction logging the impossibility of a 10k battery + LTE Modem + Unpowered OTG hub fitting comfortably within a < 65mm thick case.
+* Documentation Triad synced via DEC-W16.
