@@ -43,6 +43,7 @@ ai-prompt.md
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 cyd_factory_backup.bin
+vault.yml
 
 # User-defined Unignored Files
 !.env.example
@@ -471,5 +472,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/node,linux,macos,python,freecad,windows,platformio,visualstudiocode
-vault.yml
-docs/dev/spec-interview/
+
