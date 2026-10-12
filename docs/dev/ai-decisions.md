@@ -521,3 +521,35 @@ No established capability requirements past Linux root access.
 
 **Tradeoffs / Risk:**
 - Text-mode Discord risks TOS bans for self-bots or 3rd party clients. Audio decoding will steal critical cycles and draw power, limiting terminal snappiness.
+
+---
+
+## DEC-W17: Modular USB Peripheral Architecture, Power Budget, & Physical Enclosure Limits
+
+**Date:** 2026-10-13
+
+**Problem:**
+Enclosing an internal powerbank, micro-USB OTG hub, SATA SSD, LTE modem (ZTE MF833V), RTL-SDR dongle, and Pi Zero 2W inside a sealed, weather-resistant chassis under A5 dimensions (<148 x 210 mm) and <=65 mm thickness violates volume and thermal constraints (C-03). In addition, battery pack chemistry and capacity require explicit alignment with passenger air travel safety regulations (FAA/ICAO 100 Wh ceiling).
+
+**Root Cause:**
+Stacking consumer USB dongles and powerbanks internally inflates enclosure depth past 65 mm and concentrates thermal dissipation (~4.3W under load) inside an airtight, fanless enclosure operating in 35°C tropical ambient conditions.
+
+**Decision:**
+- **Modular External USB Peripherals (C-03 Resolution):** The internal chassis encloses only core components: Pi Zero 2W, CYD 2.8" display, CardKB keyboard, Samsung 860 EVO SSD, DS3231 RTC, and the 3S 18650 UPS module. Bulky USB peripherals (ZTE MF833V LTE modem, RTL-SDR receiver) connect externally via exposed USB hub ports when needed rather than being sealed internally (REQ-UX-01, REQ-HW-03).
+- **Power Subsystem Definition:** Primary internal battery power is standardized on a 3S 18650 UPS module (11.1V nominal, ~28–39 Wh total across three 18650 cells) with I2C battery monitoring and wall-adapter charging (REQ-HW-04).
+- **Air Travel Regulatory Compliance:** Standard 3S 18650 configurations (e.g. 3 × 3.7V × 3.2Ah = 35.52 Wh; 3 × 3.7V × 2.6Ah = 28.86 Wh) remain well below the 100 Wh passenger cabin carry-on threshold (REQ-ENV-06).
+- **Fanless Conduction Cooling:** Enclosure cooling is strictly passive (no fans) to ensure weather resistance against humidity and rain (REQ-ENV-01, REQ-HW-02). Pi SoC (~2W) and SSD controller (~1.5W) must conduct heat directly to an aluminum chassis bracket or exterior heatsink plate to avoid thermal throttling (80°C threshold) in 35°C ambient conditions.
+- **CardKB Input Layering:** Terminal control keys (Ctrl, Alt, Esc, Tab, F-keys, Arrows) are mapped via sequential sticky modifier chords in software (REQ-INP-01), accommodating the ATmega328P CardKB firmware's single-byte I2C ASCII output limitation.
+
+**Physics & Feasibility Checks:**
+- *Battery Runtime:* With 3S 18650 (35.52 Wh nominal) and typical system idle draw of ~1.8W (Pi Zero 2W ~0.7W + SSD idle ~0.5W + CYD display/backlight ~0.6W), continuous baseline runtime is `35.52 Wh / 1.8W ≈ 19.7 hours`.
+- *Thermal Dissipation:* Peak load draw reaches ~4.3W (Pi Zero 2W peak ~2.0W, SSD active ~1.5W, UPS buck conversion loss ~0.8W). In an unventilated sealed volume, passive conduction to an external metallic plate is mandatory to prevent SoC throttling.
+- *Input Scancode Limitation:* CardKB emits single ASCII bytes over I2C at address `0x5F`. Hardware cannot detect concurrent multi-key scancodes. Multi-key chords must be evaluated sequentially using stateful sticky modifiers in software.
+
+**Alternatives Considered:**
+- *Enclosing all peripherals and battery internally:* Rejected (C-03) — exceeds 65 mm thickness ceiling and traps heat from LTE/SDR radios.
+- *Active fan cooling:* Rejected by operator (REQ-ENV-01) — introduces water/dust ingress vulnerabilities and acoustic noise in quiet environments.
+
+**Tradeoffs / Risk:**
+- External USB dongles (LTE, SDR) are exposed and vulnerable to snagging during handheld transit.
+- Sequential sticky chording on CardKB introduces a learning curve compared to standard desktop keyboards.
