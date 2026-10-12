@@ -1,15 +1,45 @@
 # Contradictions in Spec Interview
 
 
-| ID   | Severity | Status | Title                                       | Sources                    |
-| ---- | -------- | ------ | ------------------------------------------- | -------------------------- |
+| ID   | Severity | Status   | Title                                       | Sources                    |
+| ---- | -------- | -------- | ------------------------------------------- | -------------------------- |
 | C-01 | BLOCKER  | RESOLVED | Cess art terms vs. open-sourcing everything | A.12, 1.08, docs/README.md |
 | C-02 | MEDIUM   | RESOLVED | OTG Power &amp; Data constraints            | A.13, topology             |
+| C-03 | HIGH     | RESOLVED | A5 Size Parameter vs Battery/Dongles volume | 2.01, A.07, topology       |
+| C-04 | MEDIUM   | OPEN     | Pointer & GUI BOM vs Text-Only Vision       | A.04, 4.05, 4.06           |
 
 
 ## Open
 
+
+### C-04 · MEDIUM · OPEN · Pointer & GUI BOM vs Text-Only Vision
+**Sources:** A.04, 4.05, 4.06
+**You said:** "No current plans of adding GUI or adding trackball/joystick" (A.04); "trackball!!! see below from Bill of Materials.md" (4.05)
+**Why it conflicts:** A.04 explicitly locked the platform to "Text only currently. No current plans of adding GUI or adding trackball/joystick", but 4.05/4.06 re-introduces the BlackBerry trackball sensor module and mouse buttons from the BOM for potential GUI use. Incorporating them requires chassis cutouts, wiring, and GPIO pins that sit dormant under a text-only TUI.
+**Options:**
+- (a) Drop trackball and mouse buttons from the physical v1 case layout entirely; keep chassis pure text-TUI.
+- (b) Cut mounting holes and wire trackball to GPIOs now, mapping it to terminal scroll or cursor navigation instead of a GUI pointer.
+- (c) Reserve internal space and cutout markings on 3D/acrylic templates, but do not wire or populate them in v1 hardware.
+**Recommendation:** (b) or (a). (b) gives tactile terminal scroll without needing a GUI; (a) keeps physical build minimal.
+**Q: Should physical mounting and wiring for the trackball and mouse buttons be included in the v1 case build?**
+> A: 
+**Resolution:** 
+
 ## Resolved
+
+
+### C-03 · HIGH · RESOLVED · A5 Size Parameter vs Battery/Dongles volume
+**Sources:** 2.01, A.07, topology
+**You said:** "Daily Driver!" (2.01); "Less than A5 size" (A.07); "Size should be ideally less than A5" (A.07)
+**Why it conflicts:** An internal 10k powerbank + enclosed hub + LTE stick + RTL-SDR stacked inside an enclosed chassis would exceed the <=65mm thickness and A5 footprint ceiling.
+**Options:**
+- (a) Abandon RTL-SDR and LTE stick entirely.
+- (b) Accept a much thicker enclosure (>65mm).
+- (c) Modular external peripherals: chassis encloses 3S 18650 UPS, Pi, SSD, keyboard within <=65mm; bulky LTE/SDR dongles plug into exposed external USB hub ports as needed.
+**Recommendation:** (c), preserves internal thickness ceiling while keeping peripheral flexibility.
+**Q: How do you want to resolve the physical volume limits of combining a USB Hub, LTE Modem, and 10k battery under 65mm thick?**
+> A: Internal battery is the 3S 18650 UPS module (not an internal powerbank). Enclosure stays <=65mm / <A5. Bulky modules (RTL-SDR, LTE dongle) are external plug-and-play via exposed USB hub ports, not sealed inside.
+**Resolution:** Resolved via option (c). Internal chassis thickness capped at <=65mm with 3S 18650 UPS module. Bulky USB peripherals remain external pluggable on exposed hub ports. Codified in REQ-UX-01, REQ-HW-03, REQ-HW-04, DEC-W17.
 
 ### C-01 · BLOCKER · RESOLVED · Cess art terms vs. open-sourcing everything
 
@@ -24,9 +54,8 @@
 **Recommendation:** (c), it permanently safely quarantines copyrighted assets while maintaining open-source code without blocking the project release.
 **Q: How do you want to handle the artist's copyrighted asset redistribution?**
 
-> A:   
+> A:  
 > **Resolution: (a) Artist explicitly gave me permission to do whatever with it, except for commercializing it. She didn't give exact wording, but out of courtesy, I added that thingy. I am one of Artist's friends.**
-
 
 ### C-02 · MEDIUM · RESOLVED · OTG Power &amp; Data constraints
 
@@ -41,20 +70,5 @@
 **Recommendation:** (c), since a degraded state without the unified btrfs storage crashes the deployed orchestration services.
 **Q: How should we resolve the physical loss of storage when utilizing USB Gadget mode debugging?**
 
-> A:   
+> A:  
 > **Resolution: How would (b) work? It is already what I am doing right now. How do you think I will be able to connect the device to the programmer PC if the device is already acting as a host? (c) it is then, but that is SOOOOO janky huhuuu :C**
-
-
-
-### C-03 · HIGH · OPEN · A5 Size Parameter vs Battery/Dongles volume
-**Sources:** 2.01, A.07, topology
-**You said:** "Daily Driver!" (2.01); "Less than A5 size" (A.07); "Size should be ideally less than A5" (A.07)
-**Why it conflicts:** You want this to be a daily driver phone replacement that you can slip into a bag or pocket (A5 footprint limit, <65mm depth, A.11). However, the physical BOM currently includes a 10,000mAh Anker PD bank, a USB OTG hub, a ZTE LTE stick, and an RTL-SDR receiver sticking out of it. Stacking all these COTS (commercial off-the-shelf) components inside an enclosed weather-sealed case (REQ-UW-02) will easily break the <65mm thickness constraint. 
-**Options:**
-- (a) Abandon the RTL-SDR and LTE stick entirely, keeping it strictly to the Pi, battery, and Keyboard.
-- (b) Accept a much larger or vastly thicker (>65mm) enclosure.
-- (c) Disassemble the Anker battery bank, LTE stick, and USB hub to their bare PCBs and solder them directly to minimize Z-height, accepting the extremely high risk of battery puncture or hardware death.
-**Recommendation:** (c) for long-term if it MUST be a phone replacement, but (a) is the only immediately executable software/hardware path for the current wave.
-**Q: How do you want to resolve the physical volume limits of combining a USB Hub, LTE Modem, and 10k battery under 65mm thick?**
-> A: 
-**Resolution:** 
