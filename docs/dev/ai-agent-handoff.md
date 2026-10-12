@@ -621,7 +621,9 @@ Noted. Escaped local  from the post-push checklist.
 - `REQ-ENV-01..07`: Fanless rain-resistant passive cooling, two-thumb handheld posture, CYD ambient light sensor compensation, multi-environment audio profiles, multi-network roaming, 100 Wh airline carry-on battery compliance, 72h offline operation.
 - `REQ-INP-01..07`: CardKB terminal control mapping via software sequential sticky chords, <50ms key-to-glyph latency, modal rotary encoder, vibration/piezo buzzer alert thresholds with profile muting, sensory management toggle, ambidextrous symmetry, auxiliary Bluetooth input.
 - `REQ-HW-03..04`: Modular external USB peripherals and 3S 18650 UPS power supply.
+- `REQ-OPS-01..06`: Strict lightweight runtime (no Docker), Memory Safety bounds (<50MB RAM floor), hardware watchdog + recovery notifications, GUEST multi-tenant hardening, user-configurable configs, dotfile parity.
 
 **4. Documentation Triad Synced:**
 - Logged `DEC-W17` in `docs/dev/ai-decisions.md` documenting modular USB architecture, power budget physics, and physical enclosure constraints.
 - Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
+- Section 6 (Compute/Performance) requirements drafted in `product-requirements.md`.
