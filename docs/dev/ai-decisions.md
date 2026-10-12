@@ -553,3 +553,28 @@ Stacking consumer USB dongles and powerbanks internally inflates enclosure depth
 **Tradeoffs / Risk:**
 - External USB dongles (LTE, SDR) are exposed and vulnerable to snagging during handheld transit.
 - Sequential sticky chording on CardKB introduces a learning curve compared to standard desktop keyboards.
+
+---
+
+## DEC-W18: Platform OS Transition (Alpine Linux), GUEST Account Hardening, & Hardware Watchdog
+
+**Date:** 2026-10-13
+
+**Problem:**
+The operator requested transitioning from Raspberry Pi OS to Alpine Linux to reduce system weight and align with the minimal/portable philosophy. Additionally, the system lacks a safe GUEST user environment for demonstration and lacks sophisticated crash-recovery notifications as requested.
+
+**Root Cause:**
+The current Ansible infrastructure is heavily optimized for Debian/Apt, and the GUEST account requirement for hardened runtime limits was previously undefined.
+
+**Decision:**
+- **Alpine Linux Transition (6.07):** The project SHALL support transitioning to Alpine Linux. This requires an upcoming migration of all Ansible roles from `apt` (Debian) to `apk`/`openrc` (Alpine). Note: Musl libc implications for Python `whiskerframe` dependencies and native services need validation.
+- **GUEST Account Hardening (6.09):** A dedicated GUEST user account will be implemented using systemd/cgroups or a restricted shell environment, enforcing a runtime limit (<5s) to prevent resource monopolization (e.g., heavy forks, memory leaks).
+- **Hardware Watchdog Recovery (6.10):** The hardware watchdog will be enabled to trigger an auto-reboot on system hangs. The boot sequence will detect an unclean shutdown/crash, triggering a console notification recommending manual inspection or restoration of state rather than complex automatic state-reversion (checkpointing).
+
+**Alternatives Considered:**
+- Stay on Raspberry Pi OS: Rejected per operator enthusiasm for Alpine.
+- Simple shell timeout for guest: Rejected — easily bypassed, GUEST account requires robust cgroups/systemd limits.
+
+**Tradeoffs / Risk:**
+- Alpine Linux migration entails significant infrastructure burden (re-writing all Ansible roles) and potential binary compatibility risks with specific Python dependencies (`glibc` vs `musl`).
+- Hardware recovery notifications are diagnostic, not automatic state restoration; they rely on logs and system artifacts to guide manual clean-up rather than complex, error-prone automatic state-reversion.
