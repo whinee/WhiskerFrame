@@ -60,3 +60,12 @@
 * **REQ-PF-12 (On-Demand Dashboard)**: The device MUST NOT run an always-on dashboard to save power, but MUST offer a terminal command or key-chord to display battery, network, and git status instantly (2.18).
 * **REQ-PF-13 (Mobile Hotspot Integration)**: The deck MUST support connecting to smartphone-hosted Wi-Fi hotspots for external service access (2.01).
 * **REQ-PF-14 (Discord Messaging)**: The deck SHALL support text-based communication via official Discord webhook APIs for private messaging (2.06).
+
+## REQ-OPS (Compute, OS & Performance)
+
+* **REQ-OPS-01 (Strict Lightweight Runtime)**: The operating system and service stack MUST avoid containerization (Docker/LXC) and heavy databases to stay within the 416MB RAM envelope of the Pi Zero 2W (6.03, 6.04).
+* **REQ-OPS-02 (Memory Safety Bounds)**: System services MUST operate with `MemoryMax=` ceilings to prevent swap-thrash and system-wide OOM panics; the system SHALL be considered broken below 50MB free RAM (6.05).
+* **REQ-OPS-03 (Live Hardware Watchdog)**: The system MUST utilize a hardware watchdog for auto-rebooting on kernel hangs and notify the user of any crash recovery events upon the next login (6.10).
+* **REQ-OPS-04 (Multi-tenant Security)**: The system MUST support a GUEST user account with hardened runtime constraints (e.g., CPU time limits, restricted shell, no heavy service spawning) (6.09).
+* **REQ-OPS-05 (System Configuration)**: The system MUST support user-configurable timezone, keyboard layout, and idle timeout settings, persisting across sessions via `.whiskerframe.yaml` or user-space configuration (6.11, 6.13).
+* **REQ-OPS-06 (Dotfile Parity)**: The environment MUST support declarative configuration synchronization (e.g., Ansible or chezmoi) to match the operator’s existing laptop dotfile ecosystem (6.12).
