@@ -16,6 +16,28 @@
 
 * **REQ-HW-01 (RTC)**: The architecture MUST include an I2C DS3231 Real-Time Clock module so logs and git timestamps sync correctly while off-grid.
 * **REQ-HW-02 (Weatherproofing)**: The case MUST be fully enclosed to prevent humidity from damaging the components in tropical (PH) climates.
+* **REQ-HW-03 (Modular USB Peripherals)**: High-draw and bulky USB devices (e.g. ZTE MF833V LTE modem, RTL-SDR) MUST connect externally via exposed USB hub ports to satisfy enclosure volume constraints (C-03, REQ-UX-01).
+* **REQ-HW-04 (Power Supply)**: Primary internal power MUST be delivered via an integrated 3S 18650 UPS module (11.1V nominal, ~35 Wh) with support for wall-adapter charging (3.12, C-03).
+
+## REQ-ENV (Environmental & Operating Contexts)
+
+* **REQ-ENV-01 (Fanless Rain Resistance)**: The chassis MUST operate with passive (fanless) cooling and incorporate weather-resistant sealing to protect internal electronics during transit exposure (3.05).
+* **REQ-ENV-02 (Two-Thumb Handheld Posture)**: The physical chassis balance and keyboard placement MUST support two-thumb typing while handheld without requiring a desk or lap rest (3.02).
+* **REQ-ENV-03 (Ambient Light Compensation)**: The display subsystem SHOULD utilize the CYD on-board LDR (light sensor) to dynamically adjust backlight PWM and select high-contrast palettes in bright environments (3.06).
+* **REQ-ENV-04 (Multi-Environment Audio Profiles)**: The audio and buzzer alert subsystems MUST support configurable operational profiles (e.g. silent/classroom, quiet/library, outdoor) with an immediate software/hardware mute switch (3.08).
+* **REQ-ENV-05 (Multi-Network Roaming)**: The networking subsystem MUST support profile-based management across home WPA2, enterprise 802.1X, mobile hotspots, and captive portals (3.10).
+* **REQ-ENV-06 (Air Travel Pack Compliance)**: The onboard battery pack MUST remain strictly under 100 Wh (3S 18650 pack ~35 Wh) to comply with FAA/ICAO passenger aircraft cabin carry-on regulations (3.09).
+* **REQ-ENV-07 (Multi-Day Offline Operation)**: Core documentation, tools, and local storage MUST operate offline for a minimum of 72 hours without data loss or network degradation (3.11).
+
+## REQ-INP (Input Subsystem)
+
+* **REQ-INP-01 (CardKB Terminal Control Mapping)**: The input subsystem MUST map terminal control characters (Ctrl, Alt, Esc, Tab, Arrow keys, Function keys) via software modifier layers and sequential sticky chords on the CardKB matrix (4.01, 4.02, 4.03).
+* **REQ-INP-02 (Key-to-Glyph Latency)**: Keypress-to-terminal display latency MUST remain imperceptible (<50 ms) under normal typing load (4.13).
+* **REQ-INP-03 (Modal Rotary Encoder)**: The input subsystem MAY support a hardware rotary encoder with a push-button modal cycle (volume, brightness, scroll, font size) and visual mode indicator (4.07).
+* **REQ-INP-04 (Tactile Haptics & Audible Alerts)**: The system MAY support a vibration motor and piezo buzzer for critical system state warnings (battery <5%, earlyoom kills, critical alarms) bounded by active audio profiles (4.09, 4.10, REQ-ENV-04).
+* **REQ-INP-05 (Sensory Management Mode)**: The UI and alert system MUST provide a single-action toggle to silence auxiliary alerts and prevent cognitive sensory overload (4.12).
+* **REQ-INP-06 (Ambidextrous Layout)**: Physical chassis controls and button positions MUST maintain bilateral symmetry for equal left- and right-handed reachability (4.16).
+* **REQ-INP-07 (Auxiliary Bluetooth Input)**: The system MAY support pairing external Bluetooth keyboards or input devices via the host Bluetooth controller (4.15).
 
 ## REQ-LIC (Licensing)
 
