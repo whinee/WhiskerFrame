@@ -625,5 +625,7 @@ Noted. Escaped local  from the post-push checklist.
 
 **4. Documentation Triad Synced:**
 - Logged `DEC-W17` in `docs/dev/ai-decisions.md` documenting modular USB architecture, power budget physics, and physical enclosure constraints.
+- Logged `DEC-W18` in `docs/dev/ai-decisions.md` documenting the Alpine Linux transition roadmap, GUEST user hardening, and watchdog/crash-recovery patterns.
 - Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
 - Section 6 (Compute/Performance) requirements drafted in `product-requirements.md`.
+- Section 6 follow-ups answered and logged in `0-followups-06.md`.
