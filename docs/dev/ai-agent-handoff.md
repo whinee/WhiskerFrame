@@ -602,3 +602,26 @@ Noted. Escaped local  from the post-push checklist.
 * Created `0-followups-02.md` containing `F-02.01` to `F-02.04` probing the physics of streaming audio, Discord TOS bans, ALSA/Pulse audio CPU stealing, and retro-gaming over a 10fps terminal interface.
 * Generated `C-03` contradiction logging the impossibility of a 10k battery + LTE Modem + Unpowered OTG hub fitting comfortably within a < 65mm thick case.
 * Documentation Triad synced via DEC-W16.
+
+## Q: 2026-10-13 - Sections 3 and 4 Processed & Contradiction C-03 Resolved
+### Question/Action (Operator)
+* Contradictions Resolved: C-03; Sections done: 2-4.
+
+### Answer (Agent)
+**1. Contradictions Processed:**
+- **C-03 (A5 Size vs Battery/Dongles Volume)**: Resolved via option (c). Internal battery standardized on Waveshare 3S 18650 UPS module (11.1V nominal, ~35 Wh) inside <=65mm thickness enclosure. Bulky peripherals (ZTE MF833V LTE modem, RTL-SDR) connect externally via exposed USB hub ports. Moved to Resolved.
+- Logged **C-04 (Pointer & GUI BOM vs Text-Only Vision)** in `contradictions.md` as OPEN (Medium severity) probing whether physical trackball and mouse buttons should be mounted/wired in v1 hardware.
+
+**2. Followups & Notes Generated:**
+- Created `0-followups-03.md` (F-03.01 through F-03.06: transit theft mitigation, fanless thermal throttling vs heatsink, outdoor screen contrast vs 350 nit limit, silence profile switch, captive portal login, 72h offline battery physics).
+- Created `0-followups-04.md` (F-04.01 through F-04.07: sequential sticky chords on CardKB, custom PCB roadmap, rotary encoder/OLED bus allocation, touch controller deferral, faceplate area density, buzzer triggers, hardware switches).
+- Created `notes.md` with statement-only observations (two-thumb posture, cyberpunk aesthetic, 3S 18650 air travel compliance ~28-39 Wh, CardKB latency, symmetrical chassis).
+
+**3. Product Requirements Codified:**
+- `REQ-ENV-01..07`: Fanless rain-resistant passive cooling, two-thumb handheld posture, CYD ambient light sensor compensation, multi-environment audio profiles, multi-network roaming, 100 Wh airline carry-on battery compliance, 72h offline operation.
+- `REQ-INP-01..07`: CardKB terminal control mapping via software sequential sticky chords, <50ms key-to-glyph latency, modal rotary encoder, vibration/piezo buzzer alert thresholds with profile muting, sensory management toggle, ambidextrous symmetry, auxiliary Bluetooth input.
+- `REQ-HW-03..04`: Modular external USB peripherals and 3S 18650 UPS power supply.
+
+**4. Documentation Triad Synced:**
+- Logged `DEC-W17` in `docs/dev/ai-decisions.md` documenting modular USB architecture, power budget physics, and physical enclosure constraints.
+- Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
