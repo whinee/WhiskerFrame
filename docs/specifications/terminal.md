@@ -1,4 +1,4 @@
-### 2.2 Terminal & Cockpit Contract (`cyd-terminal`)
+### §2.2 Terminal & Cockpit Contract (`cyd-terminal`)
 
 * **Line Discipline & Input:** The bridge takes ASCII bytes from CardKB (`0x5F`) and injects them into a pseudo-terminal (PTY) running a `bash` login shell.
 * **Rendering Loop:** Terminal state is maintained via a VT100 character-grid emulator. The bridge computes screen diffs (`grid.diff`) and translates updates to `DRAW_CELLS` commands.

@@ -1,4 +1,4 @@
-### 2.4 Storage Mount Contract (Template + Generator)
+### §2.4 Storage Mount Contract (Template + Generator)
 
 The persistent SSD mount is **never a committed, baked unit**. The repo ships a parameterized template and a generator; the live unit is produced from config, and the destructive and irreversible steps stay gated to a human.
 

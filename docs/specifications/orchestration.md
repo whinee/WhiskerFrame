@@ -1,4 +1,4 @@
-## 3. Orchestration & Multi-Agent Architecture
+## §3. Orchestration & Multi-Agent Architecture
 
 The goal of this cyberdeck is to serve as an intelligent field tool. To prevent token waste, runaway subshells, or system corruption, agents operate under a **Strict Supervisor / DAG Execution Model**.
 
@@ -38,7 +38,7 @@ The goal of this cyberdeck is to serve as an intelligent field tool. To prevent 
 
 ```
 
-### 3.1 Task Contract Schema
+### §3.1 Task Contract Schema
 
 The Orchestrator must never issue conversational prompts to Worker Agents. Every task fan-out must conform to a typed contract:
 
@@ -63,7 +63,7 @@ The Orchestrator must never issue conversational prompts to Worker Agents. Every
 
 ```
 
-### 3.2 Agent Execution Rules & Circuit Breakers
+### §3.2 Agent Execution Rules & Circuit Breakers
 
 1. **The Sealed Deck Invariant:** Never emit commands assuming physical access. The ESP32 is flashed strictly via the Pi's internal venv esptool. Factory flash backup (`cyd_factory_backup.bin`) is immutable.
 2. **Serial Exclusivity Lock:** Any agent interacting with the CYD via esptool or testing direct serial MUST first verify `terminal.service` is stopped (`systemctl stop terminal`).
