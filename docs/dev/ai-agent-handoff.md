@@ -629,3 +629,43 @@ Noted. Escaped local  from the post-push checklist.
 - Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
 - Section 6 (Compute/Performance) requirements drafted in `product-requirements.md`.
 - Section 6 follow-ups answered and logged in `0-followups-06.md`.
+
+## Q: 2026-10-13 - Sections 5, 7, 9, 10, 11 Processed & Contradiction C-05 Opened
+### Question/Action (Operator)
+* Interview mode: Process answered Section 11 from `0.md`, and answered follow-ups for Sections 9 and 10.
+* Generate `0-followups-11.md`, check contradictions, draft REQs and sync Documentation Triad.
+
+### Answer (Agent)
+**1. Spec Interview Processed:**
+- Read answered Section 11 items (`11.01` through `11.10`) from `0.md` (read-only):
+  - `11.01`: Tiered bus definition (Small: I2C/UART/SPI, Medium: USB, Big: PCIe/NVMe future).
+  - `11.02`: Existing hardware bus mapping to Small and Medium tiers.
+  - `11.03`: Modular expansion, EEPROM discovery scheme (`VID:PID` + UUIDv7), and pin negotiation.
+  - `11.04`: Power rails (5V, 3.3V) and electrical protection (100mA PTC fuse, TVS diodes).
+  - `11.05`: Mechanical connector sourcing realities.
+  - `11.06`: Peripheral module wishlist.
+  - `11.07`: Internal bus scope (not a standalone commercial product).
+  - `11.08`: Backward compatibility commitment.
+  - `11.09`: Crypto module clarification (deferred concept).
+  - `11.10`: Standard adoption over proprietary bus invention.
+- Created `0-followups-11.md` containing `F11.01` through `F11.05` probing multi-protocol pin negotiation physics, edge-card sourcing contradictions, 100mA PTC fuse ratings vs LTE/SDR draw, crypto module use cases, and open-standard Qwiic/USB adoption.
+- Logged **C-05 (Custom Edge-Card Modular Bus vs Sourcing & Standards)** in `contradictions.md` as OPEN (Medium severity) probing custom edge-card connectors vs off-the-shelf standards in v1.
+
+**2. Follow-up Answers Processed:**
+- `F09.01`: Battery capacity validation through software I2C telemetry (INA219 on UPS) rather than external bench equipment.
+- `F09.08`: Defined three-tier power profile architecture: `ACTIVE`, `IDLE/POWERSAVE` (600MHz governor, display dimmed, SSD spindown), and `AIRPLANE/DEEP-IDLE` (radios disabled, screen unpowered, lowest current draw).
+- `F10.01`: Physical prototype envelope measured at ~110 x 180 x 70 mm (comfortably within A5 footprint).
+- `F10.09`: Explicit priority for drop/vibration protection and SSD shock mounting over sub-centimeter thickness (+10mm buffer accepted).
+- `F-05.02 / F-05.03`: LED matrix deferred to v2; font subsystem optimized with reduced ASCII/symbol-only glyph cache for CYD memory constraints.
+- `F-07.01 / F-07.02`: Authenticated/encrypted SMB and File Browser access; automated Backrest snapshots strictly network-gated off LTE.
+
+**3. Product Requirements Codified:**
+- `REQ-UX-04..08`: UI customizability, splash screen, physical silence toggles, deferred LED matrix, reduced glyph cache.
+- `REQ-STORAGE-01..03`: Network-gated Backrest backup, authenticated encrypted file sharing, zero uncurated file deletions.
+- `REQ-PWR-01..05`: Three-tier power profiles, emergency 5% cutoff, I2C INA219 software capacity logging, dedicated DC pack charging, always-on mobile idle.
+- `REQ-MECH-01..07`: 110x180x70mm chassis footprint, laser-cut acrylic/MDF fabrication, drop/shock protection priority (+10mm bumper), exposed port layout, passive SoC thermal conduction, sealed deck philosophy, WhiskerFrame branding.
+- `REQ-MOD-01..03`: 3-tier bus hierarchy, 100mA PTC and TVS small-bus protection, and off-the-shelf Qwiic/USB interface adoption deferring custom edge cards to v2.
+
+**4. Documentation Triad Synced:**
+- Logged `DEC-W19` (UI customization, font glyph subsetting, deferred LED matrix), `DEC-W20` (storage lifecycle, encrypted sharing, Backrest snapshots), `DEC-W21` (power profiles, telemetry discharge logging), `DEC-W22` (mechanical envelope, acrylic fabrication, drop protection), and `DEC-W23` (tiered bus architecture, Qwiic/USB standardization, edge card deferral) in `docs/dev/ai-decisions.md`.
+- Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
