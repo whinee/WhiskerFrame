@@ -578,3 +578,110 @@ The current Ansible infrastructure is heavily optimized for Debian/Apt, and the 
 **Tradeoffs / Risk:**
 - Alpine Linux migration entails significant infrastructure burden (re-writing all Ansible roles) and potential binary compatibility risks with specific Python dependencies (`glibc` vs `musl`).
 - Hardware recovery notifications are diagnostic, not automatic state restoration; they rely on logs and system artifacts to guide manual clean-up rather than complex, error-prone automatic state-reversion.
+
+---
+
+## DEC-W19: UI Customization, Font Glyph Subset Caching, & Deferred LED Matrix
+
+**Date:** 2026-10-13
+
+**Problem:**
+Loading a full Unicode/Emoji-supported font (e.g. Comic Mono) onto the ESP32 CYD coprocessor risks memory exhaustion and rendering latency over the 115200 baud UART link (F-05.03). Additionally, mounting a physical MAX7219 LED matrix on the chassis adds thickness and potential EMI within the <=65mm enclosure (F-05.02).
+
+**Decision:**
+- **Font Glyph Subset Caching (REQ-UX-08, F-05.03):** The font subsystem strips full Unicode/emoji glyphs, compiling only essential 7-bit ASCII and standard box-drawing / terminal control glyphs into the CYD SPI RAM cache.
+- **LED Matrix Deferral (REQ-UX-07, F-05.02):** The MAX7219 LED matrix is formally deferred to v2 to preserve physical chassis compactness and weather sealing.
+- **Resource-Efficient Status Icons (REQ-PF-16, 5.02):** Dashboard and status-line icons are designed for minimal serial byte payload over the UART bridge.
+- **User Configurable UI (REQ-UX-04, REQ-UX-05):** Themes, fonts, and layout options are configurable via `.whiskerframe.yaml` and on-device chords, with a boot splash rendered within 1–2s.
+
+**Tradeoffs / Risk:**
+- Full Unicode text, emojis, and extended CJK scripts will render as replacement glyphs (`?` or placeholder box).
+
+---
+
+## DEC-W20: Storage Lifecycle, Encrypted Sharing, & Backrest Automated Snapshots
+
+**Date:** 2026-10-13
+
+**Problem:**
+Unauthenticated file sharing over a mobile Wi-Fi AP risks unauthorized access (F-07.01). Automated cloud/remote backups running over metered cellular connections risk bandwidth exhaustion and battery drain (F-07.02). Automatic deletion of old project files risks data loss (7.13).
+
+**Decision:**
+- **Encrypted & Authenticated File Sharing (REQ-STORAGE-02, F-07.01):** File sharing over SMB or File Browser requires mandatory user authentication and transport encryption (`smb encrypt = required`), backed by firewall rules.
+- **Network-Gated Snapshot Backups (REQ-STORAGE-01, F-07.02):** Automated snapshots and backups (via Backrest / restic) to the home server run strictly when connected to trusted, non-LTE networks.
+- **Zero Uncurated Deletion (REQ-STORAGE-03, 7.13):** Working project files on the persistent SSD are never automatically purged; primary archives remain synced to the home network / git remotes.
+
+**Tradeoffs / Risk:**
+- Running Backrest snapshots on the Pi Zero 2W requires strict CPU/memory limits (`MemoryMax=`, `nice`) to prevent OOM panics during index hashing.
+
+---
+
+## DEC-W21: Power Management Architecture, Three-Tier Power Profiles, & Telemetry-Based Battery Profiling
+
+**Date:** 2026-10-13
+
+**Problem:**
+The Pi Zero 2W lacks native ACPI suspend-to-RAM (S3). Battery runtime targets must be achievable without external hardware test instruments, which the operator cannot source (F09.01). Power saving modes were previously vague (F09.08).
+
+**Decision:**
+- **Three-Tier Power Profiles (REQ-PWR-01, F09.08):**
+  1. `ACTIVE`: Full CPU frequency (1.0GHz), display backlight on (LDR ambient-sensing active), radios enabled, SSD active (~3.5W load; ~10.1h runtime on 35.52 Wh pack).
+  2. `IDLE/POWERSAVE`: CPU governor to `powersave` (600MHz), display blanked/dimmed, SSD spindown via `hdparm -y`, non-essential timers paused (~1.1W; ~32.3h runtime).
+  3. `AIRPLANE/DEEP-IDLE`: All radios disabled (`rfkill block all`), display unpowered, CPU 600MHz, lowest possible sleep draw (~0.55W; ~64.6h runtime).
+- **Telemetry-Based Software Profiling (REQ-PWR-03, F09.01):** Pack capacity and discharge curves will be measured and logged in software by sampling the Waveshare UPS I2C telemetry (INA219 voltage/current) during operational discharge, eliminating the need for bench test instruments.
+- **Low-Battery Emergency Cutoff (REQ-PWR-02, 9.05, 9.06):** Clean system shutdown is executed at 5% battery to prevent BTRFS filesystem corruption and protect lithium cell longevity.
+- **Dedicated DC Barrel Charging (REQ-PWR-04, 9.02, 10.04):** The internal 3S pack is charged via its dedicated 12.6V DC barrel charger; run-while-charging is supported.
+
+**Physics & Feasibility Checks:**
+- *Energy Calculation:* 3S 18650 pack (3 × 3.7V nominal × 3.2Ah advertised) = `35.52 Wh`.
+- *Active Runtime:* `35.52 Wh / 3.5W ≈ 10.1 hours`.
+- *Idle Runtime:* `35.52 Wh / 1.1W ≈ 32.3 hours`.
+- *Deep-Idle Runtime:* `35.52 Wh / 0.55W ≈ 64.6 hours`.
+
+**Tradeoffs / Risk:**
+- Background tasks in Deep-Idle must be strictly suppressed to prevent waking the SSD from spindown.
+
+---
+
+## DEC-W22: Mechanical Enclosure Envelope, Acrylic Laser Fabrication, & Drop-Protection Tradeoff
+
+**Date:** 2026-10-13
+
+**Problem:**
+Chassis dimensions, fabrication constraints, and durability tradeoffs needed concrete boundaries (F10.01, F10.09). Handheld two-thumb ergonomics require physical rigidity against flex.
+
+**Decision:**
+- **Enclosure Envelope (REQ-MECH-01, F10.01):** Standardize prototype envelope at approximately 110 x 180 x 70 mm, safely under the A5 perimeter (<148 x 210 mm).
+- **Drop Protection Priority (REQ-MECH-03, F10.09):** The operator explicitly accepts up to +10mm protective bumper thickness and +500g chassis mass in exchange for structural drop survival and SSD shock mounting.
+- **Laser-Cut Fabrication (REQ-MECH-02, 10.02, 10.03):** Enclosure casework will be fabricated from black acrylic and MDF using the in-house Ortur Laser Master 3; complex 3D-printed internal brackets will be outsourced.
+- **Thermal Conduction (REQ-MECH-05, 10.06):** Fanless cooling relies strictly on passive conduction from the Pi Zero 2W SoC to an external aluminum plate/heatsink.
+- **Exposed Port Complement (REQ-MECH-04, 10.04):** DC barrel charging jack, 2x USB-A host ports (from the unpopulated internal hub), and an optional mini-HDMI extension are exposed externally.
+- **WhiskerFrame Identity (REQ-MECH-07, 10.11, 10.12):** Casework and UI prominently feature the WhiskerFrame name and cat-themed styling.
+
+**Tradeoffs / Risk:**
+- 70mm enclosure depth slightly exceeds the original 65mm ideal ceiling, but is explicitly approved by the operator to accommodate shock-mounting and drop buffers.
+
+---
+
+## DEC-W23: Tiered Bus Architecture, Off-The-Shelf Standardization, & Deferral of Custom Edge Cards
+
+**Date:** 2026-10-13
+
+**Problem:**
+Desiring a custom edge-card modular bus with EEPROM identification and dynamic pin negotiation conflicts with unsourceable physical parts ("pipe dream") and the operator directive not to invent proprietary standards (C-05, 10.08, 11.03, 11.10).
+
+**Decision:**
+- **Tiered Bus Model (REQ-MOD-01, 11.01, 11.02):**
+  - *Small Bus:* Low-speed serial/I2C (UART to CYD coprocessor, I2C-0 to CardKB, I2C-1 to UPS/RTC).
+  - *Medium Bus:* USB 2.0 (internal hub connecting SSD, external exposed host ports for LTE/SDR/GPS).
+  - *Big Bus:* High-speed PCIe/NVMe (formally deferred to future SBC upgrades e.g. Pi 5).
+- **Open Standard Adoption (REQ-MOD-03, C-05, 11.10):** Defer custom edge-card connectors to v2. Standardize v1 expansion on open standards: SparkFun Qwiic / Adafruit STEMMA QT (4-pin JST-SH 1.0mm) for 3.3V I2C sensors, and USB 2.0 Type-A for medium-bus peripherals.
+- **Electrical Protection Limits (REQ-MOD-02, 11.04):** Small-bus auxiliary power rails incorporate TVS diode suppression and a 100mA PTC resettable fuse. High-power peripherals (LTE, SDR) are strictly prohibited from small-bus rails and must draw from 5V USB ports.
+- **Crypto Module Deferral (11.06, 11.09):** The vague "crypto module" concept is deferred from v1 hardware.
+
+**Physics & Feasibility Checks:**
+- *I2C Sensor Draw:* BME280 (<1mA), ADXL345 (140µA), DS3231 (<200µA). Combined load <5mA, well within the 100mA PTC rating.
+- *USB Peripheral Draw:* ZTE MF833V LTE modem peak current reaches ~1000mA at 5V during cellular transmission; RTL-SDR draws ~280mA. These would instantly blow a 100mA PTC and require dedicated USB host power routing.
+
+**Tradeoffs / Risk:**
+- Deferring custom edge-cards means modular hardware hacking in v1 is limited to I2C sensor breakouts and USB dongles.
