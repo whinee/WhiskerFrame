@@ -11,6 +11,17 @@
 * **REQ-UX-01 (Form Factor)**: The deck MUST fit within an A5 perimeter (148 x 210 mm) and MUST be thinner than 65 mm.
 * **REQ-UX-02 (Tactile Input)**: The deck MUST feature physical keys (not glass) to mitigate thumb-typing constraints of standard phones.
 * **REQ-UX-03 (Zero Distraction)**: The deck MUST have no push-notification system or ad-supported software interrupting the terminal experience.
+* **REQ-UX-04 (UI Customization)**: The UI MUST allow full user-configurable customization from the host (`.whiskerframe.yaml`) and from the device itself for color themes, font family/style, status line fields, and layout configuration (5.01, 5.11).
+* **REQ-UX-05 (User-Facing Splash)**: The device SHOULD display a customizable splash screen on boot, rendered within 1-2 seconds of terminal initialization (5.09).
+* **REQ-UX-06 (Physical Alerts & Switches)**: The system MUST include dedicated physical toggle switches for radio (Wi-Fi/LTE) kill, master audio mute, and auxiliary alert (buzzer) mute to ensure operational silence in sensitive environments (3.08, 4.07, env-req).
+* **REQ-UX-07 (LED Matrix Deferred)**: The MAX7219 LED matrix is deferred to v2 to maintain physical chassis thinness (F-05.02).
+* **REQ-UX-08 (Resource-Efficient Glyphs)**: The font subsystem MUST use a reduced ASCII/necessary-symbol-only glyph cache to fit within CYD memory constraints, rather than full Unicode support (F-05.03).
+
+## REQ-STORAGE (Storage Lifecycle & Remote Access)
+
+* **REQ-STORAGE-01 (Automated Data Lifecycle)**: The device SHOULD implement a backup mechanism (e.g. backrest) for critical project data to an external home server, synchronized only when connected to a trusted, non-LTE network (7.07, 7.10, F-07.02).
+* **REQ-STORAGE-02 (Secure Self-Hosted Sharing)**: File access, including SMB/File Browser, MUST be authenticated and traffic encrypted (smb encrypt = required) with firewall restrictions (F-07.01).
+* **REQ-STORAGE-03 (Zero Uncurated Deletion)**: Working project data on the persistent SSD MUST NOT be deleted automatically; local cleanups are manual, with authoritative copies retained on the home server / git remotes (7.13).
 
 ## REQ-HW (Hardware Enclosure & Peripherals)
 
@@ -60,6 +71,7 @@
 * **REQ-PF-12 (On-Demand Dashboard)**: The device MUST NOT run an always-on dashboard to save power, but MUST offer a terminal command or key-chord to display battery, network, and git status instantly (2.18).
 * **REQ-PF-13 (Mobile Hotspot Integration)**: The deck MUST support connecting to smartphone-hosted Wi-Fi hotspots for external service access (2.01).
 * **REQ-PF-14 (Discord Messaging)**: The deck SHALL support text-based communication via official Discord webhook APIs for private messaging (2.06).
+* **REQ-PF-16 (Resource-Efficient Icons)**: Icons in the status bar or dashboard SHOULD be rendered efficiently, acknowledging the serial link speed limitations of the UART bridge (5.02, 5.03).
 
 ## REQ-OPS (Compute, OS & Performance)
 
@@ -69,3 +81,27 @@
 * **REQ-OPS-04 (Multi-tenant Security)**: The system MUST support a GUEST user account with hardened runtime constraints (e.g., CPU time limits, restricted shell, no heavy service spawning) (6.09).
 * **REQ-OPS-05 (System Configuration)**: The system MUST support user-configurable timezone, keyboard layout, and idle timeout settings, persisting across sessions via `.whiskerframe.yaml` or user-space configuration (6.11, 6.13).
 * **REQ-OPS-06 (Dotfile Parity)**: The environment MUST support declarative configuration synchronization (e.g., Ansible or chezmoi) to match the operator’s existing laptop dotfile ecosystem (6.12).
+
+## REQ-PWR (Power & Battery Management)
+
+* **REQ-PWR-01 (Three-Tier Power Profiles)**: The power management subsystem MUST implement three defined profiles: `ACTIVE` (standard clocking, display on, radios active), `IDLE/POWERSAVE` (CPU governor 600MHz, display blanked/dimmed, SSD spindown via `hdparm -y`), and `AIRPLANE/DEEP-IDLE` (all radios disabled via `rfkill`, display off, CPU 600MHz, ~0.55W idle target) (9.08, F09.08).
+* **REQ-PWR-02 (Hardware Low-Battery Cutoff)**: The system MUST trigger an orderly emergency shutdown at 5% battery capacity to protect lithium cell chemistry from over-discharge and prevent BTRFS filesystem corruption (9.05, 9.06).
+* **REQ-PWR-03 (Telemetry-Based Capacity Profiling)**: The system SHALL sample and log voltage/current telemetry from the Waveshare UPS I2C interface (INA219) to characterize cell capacity and runtime curves in software, without requiring external testing hardware (9.07, F09.01).
+* **REQ-PWR-04 (Dedicated DC Pack Charging)**: The internal 3S 18650 UPS pack MUST be charged via its dedicated DC barrel jack / bundled charger; run-while-charging MUST be supported; USB-PD pack charging is deferred to v2 (9.02, 10.04).
+* **REQ-PWR-05 (Always-On Mobile Idle)**: The system SHALL maintain an always-on low-power idle state rather than cold boot cycles when stationary (9.09).
+
+## REQ-MECH (Mechanical, Chassis & Fabrication)
+
+* **REQ-MECH-01 (Chassis Envelope)**: The physical chassis MUST measure approximately 110 x 180 x 70 mm or smaller, fitting strictly within an A5 perimeter (148 x 210 mm) (10.01, F10.01).
+* **REQ-MECH-02 (Laser-Cut Fabrication)**: Case components SHALL be laser-cut from black acrylic and MDF using the in-house Ortur Laser Master 3; complex 3D-printed brackets SHALL be outsourced (10.02, 10.03).
+* **REQ-MECH-03 (Drop Resistance & Structural Cushioning)**: Mechanical design MUST prioritize shock/drop protection over sub-centimeter thickness, allocating up to +10 mm protective buffer and shock mounting for the SSD (10.09, F10.09).
+* **REQ-MECH-04 (Exposed Port Complement)**: The chassis MUST expose a DC barrel charging jack, 2x USB-A host ports from the internal hub, and an optional mini-HDMI extension to full HDMI (10.04).
+* **REQ-MECH-05 (Passive Conduction Thermal Path)**: Thermal dissipation MUST rely strictly on passive conduction from the Pi Zero 2W SoC to an external aluminum plate or heatsink bracket (10.06).
+* **REQ-MECH-06 (Sealed Deck Philosophy)**: The chassis MUST remain a sealed enclosure with no required physical maintenance ports under normal field conditions (10.07).
+* **REQ-MECH-07 (WhiskerFrame Brand Identity)**: Case engraving, physical badging, and terminal UI MUST prominently express the WhiskerFrame identity and cat-themed personality (10.11, 10.12).
+
+## REQ-MOD (Modularity & Bus Architecture)
+
+* **REQ-MOD-01 (Tiered Bus Hierarchy)**: System buses MUST follow a 3-tier hierarchy: Small Bus (UART to CYD, I2C-0 to CardKB, I2C-1 to UPS/RTC), Medium Bus (USB 2.0 via hub), and Big Bus (PCIe/NVMe deferred to future host upgrades) (11.01, 11.02).
+* **REQ-MOD-02 (Modular Peripheral Isolation & Protection)**: Small-bus auxiliary rails (3.3V/5V) MUST incorporate TVS transient voltage suppression and PTC overcurrent protection capped at 100mA for sensor interfaces (11.04). High-power modular peripherals (LTE, SDR) MUST operate exclusively over USB 2.0 host ports (11.04).
+* **REQ-MOD-03 (Standardized Interface Adoption)**: Custom edge-card slot connectors, EEPROM auto-detection (`VID:PID` + UUIDv7), and multi-protocol pin negotiation are deferred to v2. Modular expansion in v1 MUST adopt standard open standards: Qwiic/STEMMA QT (I2C) for small-bus sensors and standard USB 2.0 Type-A for medium-bus peripherals (10.08, 11.03, 11.10).
