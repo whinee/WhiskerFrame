@@ -1,9 +1,9 @@
-## 4. Immediate Development Backlog
+## §4. Immediate Development Backlog
 
 Tasks are ordered strictly by hardware safety and operational priority.
 
 ```text
-[Wave 1: Verification] -> [Wave 2: Storage Core] -> [Wave 3: SD Protection] -> [Wave 4: Container Stack]
+[Wave 1: Verification] -> [Wave 2: Storage Core] -> [Wave 3: SD Protection] -> [Wave 4: Native Services & Memory Safety]
 ```
 
 ### Task Matrix

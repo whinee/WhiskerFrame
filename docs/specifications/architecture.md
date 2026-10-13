@@ -1,4 +1,4 @@
-## 1. System Architecture & Hardware Topology
+## §1. System Architecture & Hardware Topology
 
 The cyberdeck functions as an asymmetric dual-core system: a Linux host (Pi Zero 2W) handling storage, networking, PAM, and high-level agent logic, while an ESP32 coprocessor acts as a dedicated graphic/terminal rendering unit over serial.
 

@@ -1,4 +1,4 @@
-### 2.3 RGB565 Color Packing, Wire Byte Order & Display Inversion
+### §2.3 RGB565 Color Packing, Wire Byte Order & Display Inversion
 
 RGB565 values are a 16-bit packing of an 8-bit `(r, g, b)` triple, keeping the top bits of each channel: `value = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)` (5 bits red, 6 bits green, 5 bits blue). Example: pink `#ffb3e6` -> `0xFD9C`. That `uint16` *value* is identical everywhere; only its **byte order on the wire** differs by opcode.
 
