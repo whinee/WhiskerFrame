@@ -35,7 +35,8 @@ def _grid() -> Grid:
 
 
 def check_idle_keyframe_diffs_empty() -> None:
-    """An unchanged grid diffed against its own snapshot yields zero runs.
+    """
+    An unchanged grid diffed against its own snapshot yields zero runs.
 
     This is the frame count a diff-gated keyframe sends when nothing changed.
     """
