@@ -15,8 +15,12 @@ def test_private_key_rejection():
 
 
 def test_public_key_validation():
-    # Use a real format fake key
-    fake_pub = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK+WlG0w6Vp7I1y+kG6k4DqLcXw2G7/3z1q/wz5rP fake@test"
+    # Use a real format fake key (valid 32-byte ed25519 pubkey wire format)
+    fake_pub = (
+        "ssh-ed25519 "
+        "AAAAC3NzaC1lZDI1NTE5AAAAIEFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB "
+        "fake@test"
+    )
     valid, key, fingerprint = validate_ssh_key(fake_pub)
     assert valid
     assert key == fake_pub
