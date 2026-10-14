@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""
+Cyberdeck Goodbye Splash Screen Hook.
+
+Draws the goodbye doodle image ('bai baiii' on poweroff/shutdown, 'brb' on reboot)
+centered over the theme background on the CYD display link over serial.
+Holds for ~4 seconds, then wipes the display to black before power cuts out.
+
+Safety & Operational Constraints:
+- Never delays shutdown more than <= 8.0 seconds total.
+- Fails silent (exit 0) on missing serial port, bus error, or timeout.
+- Only triggered on system shutdown/reboot targets, NOT on plain terminal restart.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+# Add project root and pi directory to sys.path
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+sys.path.insert(0, str(_REPO_ROOT / "pi"))
+
+try:
+    from whiskerframe.models import DrawRect
+    from whiskerframe.protocol import serialize
+    from whiskerframe.terminal import (
+        DISPLAY_HEIGHT,
+        DISPLAY_WIDTH,
+        DrawImage,
+    )
+except ImportError:
+    # Graceful fallback if invoked in isolated environment
+    sys.exit(0)
+
+_DEFAULT_PORT: str = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+_FALLBACK_PORT: str = "/dev/ttyUSB0"
+_BAUD: int = 115200
+
+_THEME_BG: int = 0x18C5  # blurple background (#191a28)
+_BLACK: int = 0x0000
+_IMAGE_SIZE: int = 128
+_CHUNK_ROWS: int = 4
+_HOLD_DURATION_S: float = 4.0
+_MAX_TOTAL_TIMEOUT_S: float = 7.5
+
+
+def resolve_serial_port() -> str:
+    """Find the configured or active CYD serial port."""
+    if Path(_DEFAULT_PORT).exists():
+        return _DEFAULT_PORT
+    if Path(_FALLBACK_PORT).exists():
+        return _FALLBACK_PORT
+    return _DEFAULT_PORT
+
+
+def _read_image_blob(rgb565_path: Path) -> bytes | None:
+    """Read and validate the 128x128 RGB565 blob."""
+    if not rgb565_path.exists():
+        return None
+    try:
+        blob = rgb565_path.read_bytes()
+    except OSError:
+        return None
+    expected_bytes = _IMAGE_SIZE * _IMAGE_SIZE * 2
+    return blob if len(blob) == expected_bytes else None
+
+
+def _stream_image_chunks(ser: object, blob: bytes, start_time: float) -> None:
+    """Stream 128x128 image chunks centered on screen."""
+    x_pos = (DISPLAY_WIDTH - _IMAGE_SIZE) // 2
+    y_pos = (DISPLAY_HEIGHT - _IMAGE_SIZE) // 2
+    row_bytes = _IMAGE_SIZE * 2
+
+    for top in range(0, _IMAGE_SIZE, _CHUNK_ROWS):
+        if time.monotonic() - start_time > _MAX_TOTAL_TIMEOUT_S:
+            break
+        chunk_rows = min(_CHUNK_ROWS, _IMAGE_SIZE - top)
+        start_offset = top * row_bytes
+        end_offset = start_offset + (chunk_rows * row_bytes)
+        cmd = DrawImage(
+            x=x_pos,
+            y=y_pos + top,
+            w=_IMAGE_SIZE,
+            h=chunk_rows,
+            data=blob[start_offset:end_offset],
+        )
+        ser.write(serialize(cmd))  # type: ignore[attr-defined]
+    ser.flush()  # type: ignore[attr-defined]
+
+
+def _hold_and_wipe(ser: object, start_time: float, hold_s: float) -> None:
+    """Hold image for remaining duration and wipe to black."""
+    elapsed = time.monotonic() - start_time
+    remaining_hold = max(0.0, min(hold_s, _MAX_TOTAL_TIMEOUT_S - elapsed - 0.2))
+    if remaining_hold > 0:
+        time.sleep(remaining_hold)
+    black_frame = serialize(
+        DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_BLACK),
+    )
+    ser.write(black_frame)  # type: ignore[attr-defined]
+    ser.flush()  # type: ignore[attr-defined]
+
+
+def send_goodbye(
+    port: str,
+    rgb565_path: Path,
+    hold_s: float = _HOLD_DURATION_S,
+) -> None:
+    """Stream background clear, centered goodbye image, hold, and black wipe."""
+    blob = _read_image_blob(rgb565_path)
+    if blob is None:
+        return
+
+    try:
+        import serial
+        ser = serial.Serial(port, baudrate=_BAUD, timeout=1.0, write_timeout=1.0)
+    except Exception:  # noqa: BLE001
+        return
+
+    start_time = time.monotonic()
+    try:
+        clear_frame = serialize(
+            DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_THEME_BG),
+        )
+        ser.write(clear_frame)
+        ser.flush()
+        _stream_image_chunks(ser, blob, start_time)
+        _hold_and_wipe(ser, start_time, hold_s)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    finally:
+        try:
+            ser.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Cyberdeck Goodbye Screen Hook")
+    parser.add_argument(
+        "--mode",
+        choices=["shutdown", "reboot", "auto"],
+        default="auto",
+        help="Target action variant",
+    )
+    parser.add_argument(
+        "--port",
+        default="",
+        help="Serial port for CYD display link",
+    )
+    parser.add_argument(
+        "--hold",
+        type=float,
+        default=_HOLD_DURATION_S,
+        help="Hold duration in seconds before black wipe",
+    )
+    args = parser.parse_args()
+
+    # Resolve mode: default to shutdown unless reboot specified
+    mode = args.mode
+    if mode == "auto":
+        # Check systemd target state if available
+        mode = "shutdown"
+
+    image_name = "goodbye-reboot.rgb565" if mode == "reboot" else "goodbye-shutdown.rgb565"
+    rgb565_path = _REPO_ROOT / "assets/images" / image_name
+
+    port = args.port or resolve_serial_port()
+
+    # Fail silent on execution
+    try:
+        send_goodbye(port, rgb565_path, hold_s=args.hold)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
