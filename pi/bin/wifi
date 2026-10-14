@@ -1,0 +1,646 @@
+#!/usr/bin/env python3
+"""
+WhiskerFrame Cyberdeck Wi-Fi Utility.
+
+Lightweight NetworkManager CLI helper designed for 53-column cyberdeck display.
+Hardware: Raspberry Pi Zero 2W (Broadcom BCM43436, 2.4 GHz ONLY).
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import textwrap
+from typing import Any
+
+MAX_COLUMNS: int = 53
+SCAN_CACHE_PATH: str = "/tmp/wifi-scan.json"  # noqa: S108
+
+
+def wrap_text(text: str, width: int = MAX_COLUMNS) -> list[str]:
+    """Wrap multiline or long text strictly within width columns."""
+    if not text:
+        return [""]
+    out: list[str] = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            out.append(line)
+        else:
+            out.extend(textwrap.wrap(line, width=width, break_long_words=True))
+    return out
+
+
+def print_bounded(*args: Any, sep: str = " ") -> None:
+    """Print message with all lines strictly constrained to MAX_COLUMNS."""
+    raw = sep.join(str(a) for a in args)
+    for line in wrap_text(raw, MAX_COLUMNS):
+        print(line)
+
+
+def split_nmcli_terse(line: str) -> list[str]:
+    r"""
+    Split nmcli -t colon-delimited output.
+
+    NetworkManager escapes colons as '\:' and backslashes as '\\'.
+    """
+    fields = re.split(r"(?<!\\):", line.rstrip("\r\n"))
+    return [f.replace(r"\:", ":").replace(r"\\", "\\") for f in fields]
+
+
+def parse_freq_mhz(freq_str: str) -> int:
+    """Parse frequency string into integer MHz."""
+    m = re.search(r"(\d+)", freq_str)
+    return int(m.group(1)) if m else 0
+
+
+def is_5ghz_freq(freq_mhz: int) -> bool:
+    """
+    Return True if frequency is in 5 GHz band (or above).
+
+    Raspberry Pi Zero 2W (BCM43436) supports 2.4 GHz only.
+    """
+    return freq_mhz >= 4000
+
+
+def _parse_scan_line(line: str) -> tuple[dict[str, Any] | None, bool]:
+    """Parse a single line of nmcli dev wifi list."""
+    fields = split_nmcli_terse(line)
+    if len(fields) < 3:
+        return None, False
+
+    bssid = fields[0] if len(fields) > 0 else ""
+    ssid = fields[1] if len(fields) > 1 else ""
+    sig_raw = fields[2] if len(fields) > 2 else "0"
+    sec = fields[3] if len(fields) > 3 else ""
+    freq_raw = fields[4] if len(fields) > 4 else ""
+
+    if not ssid or ssid == "--":
+        return None, False
+
+    sig_digits = re.sub(r"\D", "", sig_raw)
+    signal = int(sig_digits) if sig_digits else 0
+    freq_mhz = parse_freq_mhz(freq_raw)
+    is_5g = is_5ghz_freq(freq_mhz)
+
+    entry = {
+        "bssid": bssid,
+        "ssid": ssid,
+        "signal": signal,
+        "security": sec if sec and sec != "--" else "OPEN",
+        "freq": freq_mhz,
+        "is_5ghz": is_5g,
+    }
+    return entry, is_5g
+
+
+def _dedupe_scan_entry(
+    by_ssid: dict[str, dict[str, Any]],
+    entry: dict[str, Any],
+) -> None:
+    """Insert or update SSID entry, preferring 2.4 GHz and higher signal."""
+    ssid = str(entry["ssid"])
+    if ssid not in by_ssid:
+        by_ssid[ssid] = entry
+        return
+
+    cur = by_ssid[ssid]
+    new_is_5g = bool(entry["is_5ghz"])
+    cur_is_5g = bool(cur["is_5ghz"])
+
+    if cur_is_5g and not new_is_5g:
+        by_ssid[ssid] = entry
+    elif not cur_is_5g and new_is_5g:
+        pass
+    elif int(entry["signal"]) > int(cur["signal"]):
+        by_ssid[ssid] = entry
+
+
+def _collect_scan_entries(
+    lines: list[str],
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Collect and deduplicate scan entries across output lines."""
+    by_ssid: dict[str, dict[str, Any]] = {}
+    seen_5ghz = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        entry, is_5g = _parse_scan_line(line)
+        seen_5ghz = seen_5ghz or is_5g
+        if entry:
+            _dedupe_scan_entry(by_ssid, entry)
+    return by_ssid, seen_5ghz
+
+
+def parse_nmcli_scan(output: str) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Parse nmcli -t -f BSSID,SSID,SIGNAL,SECURITY,FREQ dev wifi list output.
+
+    Dedupes by SSID keeping the strongest signal (preferring 2.4 GHz APs).
+    Returns (top_10_networks, has_5ghz_detected).
+    """
+    by_ssid, seen_5ghz = _collect_scan_entries(output.splitlines())
+    sorted_nets = sorted(by_ssid.values(), key=lambda x: x["signal"], reverse=True)
+    top_10 = sorted_nets[:10]
+
+    for idx, net in enumerate(top_10, 1):
+        net["index"] = idx
+
+    return top_10, seen_5ghz
+
+
+def _format_scan_row(net: dict[str, Any]) -> str:
+    """Format one network row into 50 columns."""
+    idx = net.get("index", 0)
+    raw_ssid = str(net.get("ssid", ""))
+    sig = int(net.get("signal", 0))
+    sec = str(net.get("security", "OPEN"))
+    is_5g = bool(net.get("is_5ghz", False))
+
+    disp_ssid = raw_ssid[:20] + "~" if len(raw_ssid) > 21 else raw_ssid
+    disp_sec = f"{sec} [5G]" if is_5g else sec
+    if len(disp_sec) > 18:
+        disp_sec = disp_sec[:17] + "~"
+
+    sig_str = f"{sig}%"
+    return f"{idx:>2}  {disp_ssid:<21} {sig_str:>4}  {disp_sec:<18}"
+
+
+def format_scan_table(
+    networks: list[dict[str, Any]],
+    has_5ghz: bool = False,
+) -> list[str]:
+    """Format scan results for 53-column display."""
+    lines: list[str] = []
+
+    if has_5ghz:
+        lines.append("WARN: 5GHz APs found (Zero 2W is 2.4GHz only)")
+
+    header = f"{'N':<2}  {'SSID':<21} {'SIG':>4}  {'SEC':<18}"
+    lines.append(header)
+    lines.append("-" * len(header))
+
+    if not networks:
+        lines.append("No Wi-Fi networks found.")
+        return lines
+
+    for net in networks:
+        lines.append(_format_scan_row(net))
+
+    return lines
+
+
+def save_scan_cache(
+    networks: list[dict[str, Any]],
+    path: str = SCAN_CACHE_PATH,
+) -> None:
+    """Save scan results to JSON cache."""
+    try:
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(networks, f, indent=2)
+        os.replace(tmp_path, path)
+    except OSError as err:
+        print_bounded(f"Notice: unable to cache scan: {err}")
+
+
+def load_scan_cache(path: str = SCAN_CACHE_PATH) -> list[dict[str, Any]]:
+    """Load cached scan results."""
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def _parse_dev_status(dev_status_out: str) -> tuple[str, str, str]:
+    """Extract primary wifi device, state, and active connection."""
+    for line in dev_status_out.splitlines():
+        if not line.strip():
+            continue
+        fields = split_nmcli_terse(line)
+        if len(fields) >= 3:
+            dev, dev_type, state = fields[0], fields[1], fields[2]
+            conn = fields[3] if len(fields) > 3 else ""
+            if dev_type in ("wifi", "802-11-wireless") or dev == "wlan0":
+                return dev, state, conn
+    return "", "disconnected", ""
+
+
+def _parse_dev_ips(dev_show_out: str) -> list[str]:
+    """Extract IPv4 addresses from nmcli dev show output."""
+    ips: list[str] = []
+    for line in dev_show_out.splitlines():
+        if not line.strip():
+            continue
+        fields = split_nmcli_terse(line)
+        if len(fields) >= 2 and fields[0].startswith("IP4.ADDRESS"):
+            ips.append(fields[1])
+    return ips
+
+
+def _parse_wifi_active(wifi_list_out: str) -> tuple[str, int, str, int]:
+    """Extract active AP details marked with asterisk."""
+    for line in wifi_list_out.splitlines():
+        if not line.strip():
+            continue
+        fields = split_nmcli_terse(line)
+        if len(fields) >= 3 and fields[0] == "*":
+            ssid = fields[1]
+            sig_d = re.sub(r"\D", "", fields[2])
+            signal = int(sig_d) if sig_d else 0
+            security = fields[3] if len(fields) > 3 else ""
+            freq_mhz = parse_freq_mhz(fields[4]) if len(fields) > 4 else 0
+            return ssid, signal, security, freq_mhz
+    return "", 0, "", 0
+
+
+def _parse_saved_conns(
+    conn_show_out: str,
+    wifi_dev: str,
+    active_conn: str,
+) -> list[dict[str, Any]]:
+    """Extract saved wifi connections."""
+    saved: list[dict[str, Any]] = []
+    for line in conn_show_out.splitlines():
+        if not line.strip():
+            continue
+        fields = split_nmcli_terse(line)
+        if len(fields) >= 2:
+            name, ctype = fields[0], fields[1]
+            cdev = fields[2] if len(fields) > 2 else "--"
+            if ctype in ("wifi", "802-11-wireless"):
+                is_active = (cdev == wifi_dev and cdev != "--") or (
+                    name == active_conn and active_conn != ""
+                )
+                saved.append({"name": name, "device": cdev, "active": is_active})
+    return saved
+
+
+def parse_status_data(
+    dev_status_out: str,
+    dev_show_out: str = "",
+    wifi_list_out: str = "",
+    conn_show_out: str = "",
+) -> dict[str, Any]:
+    """Parse NetworkManager status commands into structured info."""
+    wifi_dev, wifi_state, active_conn = _parse_dev_status(dev_status_out)
+    ip_addrs = _parse_dev_ips(dev_show_out) if dev_show_out else []
+    act_ssid, signal, sec, freq = (
+        _parse_wifi_active(wifi_list_out) if wifi_list_out else ("", 0, "", 0)
+    )
+
+    if not act_ssid and active_conn and active_conn != "--":
+        act_ssid = active_conn
+
+    saved = (
+        _parse_saved_conns(conn_show_out, wifi_dev, active_conn)
+        if conn_show_out
+        else []
+    )
+
+    return {
+        "device": wifi_dev,
+        "state": wifi_state,
+        "connection": active_conn,
+        "ip_addresses": ip_addrs,
+        "active_ssid": act_ssid,
+        "signal": signal,
+        "security": sec,
+        "freq": freq,
+        "is_5ghz": is_5ghz_freq(freq),
+        "saved_connections": saved,
+    }
+
+
+def _format_active_status(data: dict[str, Any]) -> list[str]:
+    """Format active connection details strictly <= 53 cols."""
+    lines: list[str] = []
+    ssid = data.get("active_ssid") or data.get("connection") or "unknown"
+    lines.append(f"SSID:       {ssid[:38] + '~' if len(ssid) > 39 else ssid}")
+
+    sig = data.get("signal", 0)
+    freq = data.get("freq", 0)
+    band = "5GHz" if is_5ghz_freq(freq) else "2.4GHz"
+    if sig > 0:
+        lines.append(f"Signal:     {sig}% ({band})")
+
+    sec = data.get("security")
+    if sec:
+        lines.append(f"Security:   {sec[:38] + '~' if len(sec) > 39 else sec}")
+
+    ips = data.get("ip_addresses", [])
+    if ips:
+        for ip in ips:
+            lines.append(f"IP Address: {ip[:38] + '~' if len(ip) > 39 else ip}")
+    else:
+        lines.append("IP Address: none assigned")
+    return lines
+
+
+def _format_saved_networks(saved: list[dict[str, Any]]) -> list[str]:
+    """Format saved connection names strictly <= 53 cols."""
+    if not saved:
+        return ["  (No saved Wi-Fi connections)"]
+    lines: list[str] = []
+    for conn in saved:
+        name = str(conn.get("name", ""))
+        active = bool(conn.get("active", False))
+        prefix = "* " if active else "  "
+        suffix = " (active)" if active else ""
+        max_name_len = 53 - len(prefix) - len(suffix)
+        if len(name) > max_name_len:
+            name = name[: max_name_len - 1] + "~"
+        lines.append(f"{prefix}{name}{suffix}")
+    return lines
+
+
+def format_status(data: dict[str, Any]) -> list[str]:
+    """Format status output strictly <= 53 columns."""
+    lines: list[str] = ["=== Wi-Fi Status ==="]
+    dev = data.get("device") or "none"
+    state = data.get("state") or "unknown"
+    lines.append(f"Interface:  {dev}")
+    lines.append(f"State:      {state}")
+
+    if state == "connected" or data.get("active_ssid"):
+        lines.extend(_format_active_status(data))
+
+    lines.append("")
+    lines.append("=== Saved Networks ===")
+    lines.extend(_format_saved_networks(data.get("saved_connections", [])))
+    return lines
+
+
+def run_nmcli(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run nmcli with check for existence."""
+    bin_path = shutil.which("nmcli")
+    if not bin_path:
+        print_bounded("Error: nmcli not found. NetworkManager required.")
+        return subprocess.CompletedProcess(
+            args=["nmcli"],
+            returncode=127,
+            stdout="",
+            stderr="nmcli not found",
+        )
+    return subprocess.run(  # noqa: S603
+        [bin_path, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def execute_scan() -> tuple[list[dict[str, Any]], bool, int]:
+    """Execute nmcli wifi scan with fallback if --rescan fails."""
+    base_args = [
+        "-t",
+        "-f",
+        "BSSID,SSID,SIGNAL,SECURITY,FREQ",
+        "dev",
+        "wifi",
+        "list",
+    ]
+    proc = run_nmcli([*base_args, "--rescan", "yes"])
+    if proc.returncode != 0:
+        proc = run_nmcli(base_args)
+
+    if proc.returncode != 0:
+        return [], False, proc.returncode
+
+    nets, has_5g = parse_nmcli_scan(proc.stdout)
+    save_scan_cache(nets)
+    return nets, has_5g, 0
+
+
+def cmd_status(_args: argparse.Namespace | None = None) -> int:
+    """Show current Wi-Fi status and saved connections."""
+    p_stat = run_nmcli(["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev", "status"])
+    if p_stat.returncode != 0:
+        if p_stat.returncode != 127:
+            print_bounded("Error querying NetworkManager device status.")
+        return p_stat.returncode
+
+    wifi_dev, _, _ = _parse_dev_status(p_stat.stdout)
+    target_dev = wifi_dev or "wlan0"
+
+    p_show = run_nmcli(["-t", "-f", "IP4.ADDRESS", "dev", "show", target_dev])
+    p_wifi = run_nmcli(
+        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ", "dev", "wifi", "list"],
+    )
+    p_conn = run_nmcli(["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"])
+
+    data = parse_status_data(
+        dev_status_out=p_stat.stdout,
+        dev_show_out=p_show.stdout,
+        wifi_list_out=p_wifi.stdout,
+        conn_show_out=p_conn.stdout,
+    )
+    for line in format_status(data):
+        print_bounded(line)
+    return 0
+
+
+def cmd_scan(_args: argparse.Namespace | None = None) -> int:
+    """Scan available Wi-Fi networks and print formatted table."""
+    nets, has_5g, rc = execute_scan()
+    if rc != 0:
+        print_bounded("Failed to scan Wi-Fi networks via nmcli.")
+        return rc
+
+    for line in format_scan_table(nets, has_5ghz=has_5g):
+        print_bounded(line)
+    return 0
+
+
+def _resolve_numeric_target(
+    idx: int,
+    cached: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve index N from scan cache."""
+    if not cached:
+        cached, _, rc = execute_scan()
+        if rc != 0 or not cached:
+            return None, "No networks found during scan."
+
+    match = next((n for n in cached if n.get("index") == idx), None)
+    if not match:
+        return None, f"Network #{idx} not in scan (1-{len(cached)})."
+    return match, None
+
+
+def resolve_join_target(
+    target: str,
+    cache_path: str = SCAN_CACHE_PATH,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """
+    Resolve target (N or SSID) against cache.
+
+    Returns (network_dict_or_None, error_msg_or_None).
+    """
+    cached = load_scan_cache(cache_path)
+    if target.isdigit():
+        return _resolve_numeric_target(int(target), cached)
+
+    match = next((n for n in cached if n.get("ssid") == target), None)
+    if match:
+        return match, None
+
+    return {"ssid": target, "security": "", "is_5ghz": False}, None
+
+
+def _confirm_5ghz_join() -> bool:
+    """Prompt warning when attempting to join 5 GHz network."""
+    print_bounded("WARN: Target is 5GHz. Zero 2W is 2.4GHz ONLY!")
+    try:
+        confirm = input("Attempt anyway? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return confirm == "y"
+
+
+def _prompt_password(ssid: str, sec: str, passed_pwd: str | None) -> str | None:
+    """Obtain password interactively if needed."""
+    is_open = sec in ("OPEN", "--", "NONE", "")
+    if is_open or passed_pwd is not None:
+        return passed_pwd
+
+    try:
+        return getpass.getpass(f"Password for '{ssid}': ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
+def _print_proc_error(
+    proc: subprocess.CompletedProcess[str], fail_msg: str,
+) -> None:
+    """Print failure message and stderr/stdout lines."""
+    print_bounded(fail_msg)
+    err_out = proc.stderr.strip() or proc.stdout.strip()
+    for eline in err_out.splitlines():
+        print_bounded(f"  {eline}")
+
+
+def _execute_join_connect(
+    ssid: str,
+    password: str | None,
+    hidden: bool,
+) -> int:
+    """Run nmcli dev wifi connect and report outcome."""
+    cmd = ["dev", "wifi", "connect", ssid]
+    if password:
+        cmd.extend(["password", password])
+    if hidden:
+        cmd.extend(["hidden", "yes"])
+
+    print_bounded(f"Connecting to '{ssid}'...")
+    proc = run_nmcli(cmd)
+    if proc.returncode == 0:
+        print_bounded(f"Successfully connected to '{ssid}'.")
+        return 0
+
+    _print_proc_error(proc, f"Failed to connect to '{ssid}'.")
+    return proc.returncode
+
+
+def cmd_join(args: argparse.Namespace) -> int:
+    """Join a network interactively or with specified parameters."""
+    target: str = args.target
+    net, err = resolve_join_target(target)
+    if err or not net:
+        print_bounded(f"Error: {err or 'Target resolution failed'}")
+        return 1
+
+    ssid = str(net.get("ssid", target))
+    sec = str(net.get("security", "")).upper()
+    if bool(net.get("is_5ghz", False)) and not _confirm_5ghz_join():
+        print_bounded("Connection aborted.")
+        return 1
+
+    password = _prompt_password(ssid, sec, args.password)
+    return _execute_join_connect(ssid, password, args.hidden)
+
+
+def cmd_forget(args: argparse.Namespace) -> int:
+    """Delete a saved NetworkManager connection."""
+    ssid: str = args.ssid
+    proc = run_nmcli(["connection", "delete", ssid])
+    if proc.returncode == 0:
+        print_bounded(f"Forgot connection '{ssid}'.")
+        return 0
+
+    _print_proc_error(proc, f"Failed to delete connection '{ssid}'.")
+    return proc.returncode
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="wifi",
+        description="Cyberdeck Wi-Fi Manager (53-col screen optimized)",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="subcommand")
+
+    sub.add_parser("status", help="Show active Wi-Fi & saved networks")
+    sub.add_parser("scan", help="Scan nearby Wi-Fi networks (top 10)")
+
+    p_join = sub.add_parser("join", help="Join a network (by number or SSID)")
+    p_join.add_argument("target", help="Index N from scan or SSID name")
+    p_join.add_argument(
+        "--password",
+        "-p",
+        default=None,
+        help="Wi-Fi passphrase (default: prompt)",
+    )
+    p_join.add_argument(
+        "--hidden",
+        action="store_true",
+        help="Join hidden network (hidden yes)",
+    )
+
+    p_forget = sub.add_parser("forget", help="Delete a saved connection")
+    p_forget.add_argument("ssid", help="Connection name or SSID to delete")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entrypoint."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv:
+        return cmd_status()
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    handler = {
+        "status": cmd_status,
+        "scan": cmd_scan,
+        "join": cmd_join,
+        "forget": cmd_forget,
+    }.get(args.subcommand)
+
+    if handler:
+        return handler(args)
+
+    return cmd_status()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
