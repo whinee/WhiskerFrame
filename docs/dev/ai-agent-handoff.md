@@ -6,14 +6,14 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- **Session Context:** Attended mode active (operator awake, watching). Pi mutations allowed until 05:30 PHST Oct 15; host work until 06:30.
-- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Power-cycled via UPS switch; waiting for ping.
-- **Hardware State:** Cold boot in progress; survey on first ping.
-- **Current Task:** Launching WS-1 through WS-9 in parallel (host work first, serial Pi lane for mutations).
-- **Last RESULT:** Checkpoint push at d6e06c8; phases 1-5 verified.
+- **Session Context:** Attended mode active (operator awake, watching). Operator override Q-014 completed; Cess art policy codified in DEC-W28 and REQ-LIC-02 [v1].
+- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime verified, cold boot healthy (52°C, 0 throttled).
+- **Hardware State:** Pi up, persistent journal active, terminal.service running.
+- **Current Task:** Executing parallel host workstreams (WS-1 guest login, WS-2 Ctrl latch, WS-3 goodbye splash & sleep, WS-4 wifi helper, WS-5 offline library plan, WS-6 phone hotspot 2.4GHz, WS-7 thermals, WS-8 spec/interview).
+- **Last RESULT:** Cess art policy executed; triad updated (DEC-W28, REQ-LIC-02, changelog); git index clean of derived .rgb565.
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer for link risk; TSK-05 unapplied; credentials redacted.
-- **Open Blockers:** None blocking host work. Pi lane awaits ping.
-- **Next Action:** Fan out host-only workstreams WS-2, WS-3a, WS-4, WS-6, WS-8, WS-9 immediately.
+- **Open Blockers:** Q-015 (Get written confirmation from Cess covering all files - operator action item).
+- **Next Action:** Commit DEC-W28 / art policy atomically, then dispatch WS-1 through WS-8.
 
 ## 1. What this project is
 
@@ -806,6 +806,43 @@ INTENT: [2026-10-15T00:00Z] Orchestration Wave 1 — Host Parallel Workstreams &
 9. WS-7 (Thermals & Readiness): Await Pi boot survey, diagnose ~69C idle cause, recommend mitigations.
 10. WS-8 (Spec, Interview & Docs): Process Sections A & 1 followups, keep contradictions.md updated (C-01 blocker, C-02), draft REQs with v0/v1/v2 tags.
 11. WS-9 (Hygiene): Verify spec-interview-guard, verify git status & hooks.
+
+RESULT: [2026-10-15T00:04Z] Pi Cold Boot Survey Completed:
+1. Pi Zero 2W ping online at 10.0.0.212; uptime 1m; throttled=0x0; 0 failed systemd units.
+2. Cold boot SoC temp 52.6°C (stabilized at 52.0°C idle). Free memory 167MB available, 921MB swap available.
+3. INA219 battery telemetry fresh: 12.42V (95% SoC), float charge.
+4. Persistent journal directory verified mounted and receiving entries on /mnt/250GB-SSD/log/journal.
+
+### Q-014 | 2026-10-15T00:05Z | ANSWERED
+Blocked: None. Override from operator regarding Cess artwork permission, doodle retention, and repo distribution policy.
+Options:
+  - Override Cess artwork policy: Keep doodles in `assets/images/cess/`, update README with specific non-commercial redistribution terms granted by Cess, record SHA256SUMS, untrack derived build outputs (`*.rgb565`), resolve C-01 in `contradictions.md` (conditional), add v1 REQ in `product-requirements.md`.
+Applies to: `assets/images/cess/`, `.gitignore`, `docs/dev/spec-interview/contradictions.md`, `docs/specifications/product-requirements.md`, `docs/dev/ai-decisions.md` (DEC-W28).
+Answer:
+OVERRIDE FROM OPERATOR (supersedes the "never push assets/images/cess" rule, the doodle move, and the Cess-art BLOCKER handling; log it as an ANSWERED Q first, then a DEC).
+FACTS: The doodles (lyra-doodle-original.png, lyra-doodle-transparent.png) are NOT my art; they were drawn by my friend Cess, who gave me explicit permission to use them however I want except commercially. I state that all art in assets/images/cess/ may be released publicly and redistributed, with these limits: no modification, no claiming it as someone else's work, no commercialization.
+Reply sent: Acknowledged. Doodles retained in assets/images/cess/, README authored, SHA256SUMS generated, derived .rgb565 untracked, C-01 resolved (conditional), and DEC-W28 logged.
+
+### Q-015 | 2026-10-15T00:05Z | OPEN
+Blocked: Written confirmation from Cess covering all assets/images/cess/ files.
+Options:
+  - [1] Obtain written/signed confirmation from Cess covering all files (Recommended default).
+  - [2] Formalize CC BY-NC-ND 4.0 license grant directly from Cess.
+Applies to: `assets/images/cess/`, legal posture, C-01 resolution.
+Answer: <awaiting operator action>
+Reply sent: Logged as open tracking question with recommended default [1].
+
+RESULT: [2026-10-15T00:10Z] Cess Art Policy & Licensing Triad Completed:
+1. Retained unmodified originals (`Lyra and Dreanne Christmas Night Market.png`, `lyra-doodle-original.png`, `lyra-doodle-transparent.png`) under `assets/images/cess/`. Verified `assets/images/lyra/` does not exist.
+2. Updated `assets/images/cess/README.md` recording explicit permission from Cess (dated 2026-10-15), non-commercial terms, prohibition on derivatives/claiming credit, and note on CC BY-NC-ND 4.0 alignment.
+3. Created cryptographic manifest `assets/images/cess/SHA256SUMS` for unmodified original files.
+4. Excluded derived build artifacts (`*.rgb565`, `*-derived.*`, `*-preview.*`, `*-composite.*`) via `.gitignore`; untracked committed `Lyra and Dreanne Christmas Night Market.rgb565` from git index.
+5. Explicitly excluded `assets/images/cess/` from MIT software license across `LICENSE.md`, `README.md`, `docs/LICENSE.md`, and `docs/README.md`.
+6. Resolved contradiction C-01 (conditional) in `docs/dev/spec-interview/contradictions.md` and registered Q-015 for operator written confirmation.
+7. Codified `REQ-LIC-02 [v1]` (commercial kit exclusion) and other milestone REQs in `docs/specifications/product-requirements.md`.
+8. Logged `DEC-W28` in `docs/dev/ai-decisions.md` and recorded entry in `docs/dev/changelog.md`.
+
+
 
 
 

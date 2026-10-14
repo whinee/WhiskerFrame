@@ -20,3 +20,10 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+## Excluded Assets
+
+The software license above applies to the source code, scripts, configuration templates, and technical documentation in this repository.
+It does **NOT** apply to the artistic assets located under `assets/images/cess/`. All artwork in `assets/images/cess/` is owned by the artist, Cess, and is subject to the separate non-commercial redistribution terms documented in [`assets/images/cess/README.md`](../assets/images/cess/README.md).

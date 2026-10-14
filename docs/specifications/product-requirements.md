@@ -2,7 +2,7 @@
 
 ## REQ-CAPABILITIES (User-Facing)
 
-* **REQ-CAP-01 [v1] (Offline reading)**: The deck MUST support an offline repository of articles (e.g. Wikipedia).
+* **REQ-CAP-01 [v0/v1] (Offline Reading & Documentation)**: In v0, the system MUST provide core offline documentation (man pages, bash-doc, python3-doc). In v1, the deck MUST support an offline Kiwix repository (e.g. Simple English Wikipedia ~1GB) on loopback, isolated from the guest demo environment.
 * **REQ-CAP-02 [v0] (Local coding)**: The deck MUST support local coding and offline access to Python/Bash manuals, acknowledging the limitation of the small 320x240 screen.
 * **REQ-CAP-03 [v0] (Text-Only TUI)**: The deck MUST operate strictly as a text-only platform without an LLM running locally.
 
@@ -16,6 +16,7 @@
 * **REQ-UX-06 [v1] (Physical Alerts & Switches)**: The system MUST include dedicated physical toggle switches for radio (Wi-Fi/LTE) kill, master audio mute, and auxiliary alert (buzzer) mute to ensure operational silence in sensitive environments (3.08, 4.07, env-req).
 * **REQ-UX-07 [v2+] (LED Matrix Deferred)**: The MAX7219 LED matrix is deferred to v2 to maintain physical chassis thinness (F-05.02).
 * **REQ-UX-08 [v0] (Resource-Efficient Glyphs)**: The font subsystem MUST use a reduced ASCII/necessary-symbol-only glyph cache to fit within CYD memory constraints, rather than full Unicode support (F-05.03).
+* **REQ-UX-09 [v0] (Shutdown & Reboot Splash)**: The system MUST execute an orderly goodbye splash screen ("bai baiii" on shutdown, "brb" on reboot) rendering a composited ~128x128 image within an 8-second execution window before blanking or entering sleep (WS-3).
 
 ## REQ-STORAGE (Storage Lifecycle & Remote Access)
 
@@ -50,10 +51,12 @@
 * **REQ-INP-05 [v1] (Sensory Management Mode)**: The UI and alert system MUST provide a single-action toggle to silence auxiliary alerts and prevent cognitive sensory overload (4.12).
 * **REQ-INP-06 [v1] (Ambidextrous Layout)**: Physical chassis controls and button positions SHOULD maintain bilateral symmetry for equal left- and right-handed reachability (4.16).
 * **REQ-INP-07 [v1] (Auxiliary Bluetooth Input)**: The system MAY support pairing external Bluetooth keyboards or input devices via the host Bluetooth controller (4.15).
+* **REQ-INP-08 [v0] (Sticky Ctrl Latch Chord)**: The input subsystem MUST support a dedicated Fn-layer sticky chord that latches the Ctrl modifier for exactly one subsequent alphanumeric key (`char & 0x1F`), cancelled via timeout (3s), chord toggle, or non-matching key, with cursor cell recoloring to indicate latch state (WS-2).
 
 ## REQ-LIC (Licensing)
 
 * **REQ-LIC-01 [v0] (Artwork Distribution)**: The `assets/images/cess` directory MAY be distributed publicly inside the open-source repository. The artist explicitly permitted non-commercial redistribution (C-01).
+* **REQ-LIC-02 [v1] (Commercial Exclusion for Cess Art)**: Artwork under `assets/images/cess/` MUST NOT ship in any commercial product or commercial hardware kit without separate, explicit written permission from Cess. If the cyberdeck is commercialized or sold in kit form, replacement artwork or a commercial license MUST be procured prior to sale (C-01, DEC-W28).
 
 ## REQ-PF (Purposes & Features)
 
@@ -96,6 +99,11 @@
 * **REQ-PWR-03 [v0] (Telemetry-Based Capacity Profiling)**: The system SHALL sample and log voltage/current telemetry from the Waveshare UPS I2C interface (INA219) to characterize cell capacity and runtime curves in software, without requiring external testing hardware (9.07, F09.01).
 * **REQ-PWR-04 [v0] (Dedicated DC Pack Charging)**: The internal 3S 18650 UPS pack MUST be charged via its dedicated DC barrel jack / bundled charger; run-while-charging MUST be supported; USB-PD pack charging is deferred to v2 (9.02, 10.04).
 * **REQ-PWR-05 [v0] (Always-On Mobile Idle)**: The system SHALL maintain an always-on low-power idle state rather than cold boot cycles when stationary (9.09).
+* **REQ-PWR-06 [v1] (Firmware Sleep Opcode)**: The coprocessor firmware SHOULD support an additive opcode (0x06 SLEEP) that enters low-power display sleep (DISPOFF/SLPIN, backlight off, 80MHz CPU) without deep sleeping, waking upon receipt of the next valid serial frame (WS-3).
+
+## REQ-NET (Networking & Connectivity)
+
+* **REQ-NET-01 [v0] (Terminal Wi-Fi Helper)**: The deck MUST provide a dedicated, lightweight CLI command (`wifi`) optimized for <=53 columns (`status`, `scan`, `join`, `forget`) wrapping NetworkManager for unprivileged and privileged operations (WS-4).
 
 ## REQ-MECH (Mechanical, Chassis & Fabrication)
 

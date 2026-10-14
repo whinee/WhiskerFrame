@@ -7,12 +7,11 @@
 
 Art by Cess_.2
 
-https://www.facebook.com/Cesstwo44
+- Facebook: https://www.facebook.com/Cesstwo44
+- Instagram: https://www.instagram.com/zesy.to
 
-https://www.instagram.com/zesy.to
-
-You may download and possess this work for personal, non-commercial, non-public use.
-
-No redistribution, modification, or derivative works allowed.
-
-All rights are retained by the artist.
+All artwork in this directory is subject to explicit permission granted by Cess (2026-10-15):
+- **Allowed:** Public release and unmodified redistribution with credit to Cess.
+- **Not allowed:** Modification, derivative works, claiming as anyone else's work, commercial use.
+- **Excluded from Code License:** Not covered by the repository's MIT software license.
+- Full details, checksums, and terms: see [`assets/images/cess/README.md`](../assets/images/cess/README.md).
