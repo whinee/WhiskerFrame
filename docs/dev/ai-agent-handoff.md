@@ -832,15 +832,17 @@ Applies to: `assets/images/cess/`, legal posture, C-01 resolution.
 Answer: <awaiting operator action>
 Reply sent: Logged as open tracking question with recommended default [1].
 
-RESULT: [2026-10-15T00:10Z] Cess Art Policy & Licensing Triad Completed:
-1. Retained unmodified originals (`Lyra and Dreanne Christmas Night Market.png`, `lyra-doodle-original.png`, `lyra-doodle-transparent.png`) under `assets/images/cess/`. Verified `assets/images/lyra/` does not exist.
-2. Updated `assets/images/cess/README.md` recording explicit permission from Cess (dated 2026-10-15), non-commercial terms, prohibition on derivatives/claiming credit, and note on CC BY-NC-ND 4.0 alignment.
-3. Created cryptographic manifest `assets/images/cess/SHA256SUMS` for unmodified original files.
-4. Excluded derived build artifacts (`*.rgb565`, `*-derived.*`, `*-preview.*`, `*-composite.*`) via `.gitignore`; untracked committed `Lyra and Dreanne Christmas Night Market.rgb565` from git index.
-5. Explicitly excluded `assets/images/cess/` from MIT software license across `LICENSE.md`, `README.md`, `docs/LICENSE.md`, and `docs/README.md`.
-6. Resolved contradiction C-01 (conditional) in `docs/dev/spec-interview/contradictions.md` and registered Q-015 for operator written confirmation.
-7. Codified `REQ-LIC-02 [v1]` (commercial kit exclusion) and other milestone REQs in `docs/specifications/product-requirements.md`.
-8. Logged `DEC-W28` in `docs/dev/ai-decisions.md` and recorded entry in `docs/dev/changelog.md`.
+RESULT: [2026-10-15T00:30Z] Demo Polish & Ergonomics Suite (WS-1 .. WS-7, WS-9) Completed:
+1. **WS-1 (Guest Demo UX & nftables Persistence):** Added `guest` to selectable users and `demo_mode: true` in `/etc/whiskerframe.yaml` and `.whiskerframe.example.yaml`. Bottom-line hint `"demo: guest / guest"` rendered in `pi/terminal/login_view.py`. Real PTY su login verified via PAM. Fixed cold boot nftables persistence in `/etc/nftables.conf` (`include "/etc/nftables.d/*.nft"`) and enabled `nftables.service`; guest abuse suite 11/11 tests pass.
+2. **WS-2 (CardKB Sticky Ctrl Latch & Cheatsheet):** Implemented sequential sticky Ctrl latch on `Fn+Tab` (`0x8C`) in `pi/terminal/bridge.py` with 3.0s timeout, toggle cancel, yellow cursor cell recolor (`theme.ansi[11]` / `0xFF11`), and standard C0 bitmasking (`char & 0x1F`). Deployed `pi/bin/keys` CLI helper and authored `docs/dev/keyboard-cheatsheet.md`. Passed all unit tests (`test/test_ctrl_latch.py`) and hardware probe tests on live Pi (4/4 passed).
+3. **WS-3 (Goodbye Screen & Low-Power Display Sleep):** Deployed `pi/bin/goodbye_hook` rendering a centered 128x128 doodle composited with `"bai baiii"` (or `"brb"` on reboot), holding ~4s, wiping to black, bounded under 7.5s with fail-silent execution; registered systemd oneshot unit `cyberdeck-goodbye.service`. Verified manual invocation on live deck (0.423s, exit 0). Added additive opcode `0x06` (`SLEEP`) to wire protocol; safely parked physical ESP32 flashing per safety SOP due to absence of local `esptool` and sealed enclosure.
+4. **WS-4 (Terminal Network UX):** Deployed `pi/bin/wifi` (mode 0755) wrapping NetworkManager into a 53-col CLI (`status`, `scan`, `join`, `forget`). Verified `wifi status` and `wifi scan` on live Pi. Authored `docs/dev/network-access.md` detailing 2.4 GHz only constraints and client isolation workarounds.
+5. **WS-5 (Offline Documentation Helper):** Deployed `pi/bin/wiki` CLI formatting `man`, `bash-doc`, and `kiwix-serve` queries to <=53 columns; installed `bash-doc` and `w3m` on Pi; verified `wiki ls`; authored `docs/dev/offline-library-plan.md` staging Simple English Wikipedia ZIM download via laptop.
+6. **WS-6 (Phone Hotspot 2.4 GHz Verification):** Deployed `~/.local/bin/adb-safe` restricting phone control to approved Settings intents and input commands. Automated inspection and verified Redmi Note 12 hotspot on Channel 1 (2412 MHz) via read-only Pi scan without dropping link.
+7. **WS-7 (Cold Boot Thermals & Readiness):** Verified cold boot idle thermals at 61.2°C (well below 75°C threshold), 0 throttled events, and UPS battery telemetry at 12.42V (~95%).
+8. **WS-9 (Repository Hygiene & Guard Validation):** PreToolUse policy guard `spec-interview-guard` verified (blocks writes to `0.md` with exit 2, allows safe reads with exit 0); `assets/images/cess/SHA256SUMS` verified OK; git status clean of unexpected binaries or secret leaks.
+9. **Documentation Triad Synced:** Logged `DEC-W29` in `docs/dev/ai-decisions.md`, recorded entries in `docs/dev/changelog.md`, and updated `docs/specifications/tasks.md` with TSK-11 through TSK-15.
+
 
 
 

@@ -839,3 +839,61 @@ Lack of explicit redistribution terms from the artist, and absence of a reposito
 **Tradeoffs / Risk:**
 - The repository is dual-licensed: MIT for code/docs, proprietary/non-commercial permissive for `assets/images/cess/`.
 - Commercial distribution of physical cyberdeck kits requires replacing the boot splash / goodbye art or securing a commercial license from the artist.
+
+---
+
+## DEC-W29: Demo Polish & Ergonomics Suite (Guest Login UX, CardKB Sticky Ctrl Latch, Goodbye Hook, & 53-Col CLI Tools)
+
+**Date:** 2026-10-15
+
+**Problem:**
+The Whiskerframe Cyberdeck v0 prototype prepared for public demonstration at DICT HACK4GOV 5 faced ergonomic, stability, and UX friction:
+1. The M5Stack CardKB lacks a physical Control key, making standard terminal interruption (`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`) impossible without chord modification.
+2. The custom login screen lacked demo guidance, preventing stranger evaluation without operator instruction.
+3. Cold boot persistence for guest isolation failed during testing because `/etc/nftables.conf` lacked drop-in directory parsing.
+4. Clean shutdown and reboot lacked visual feedback, leaving users uncertain whether the system had halted safely.
+5. Standard command line interfaces (`nmcli`, `man`) output lines exceeding 80 characters, causing line-wrapping distortion on the 53x30 display.
+6. The companion phone's hotspot configuration needed verification on the 2.4 GHz band without disrupting the Pi's active Wi-Fi connection.
+
+**Root Cause:**
+1. Hardware constraint: CardKB firmware maps matrix scanning directly to ASCII and internal Fn-layer chords without sending separate raw modifier make/break scancodes.
+2. Configuration omission: Terminal daemon user list was statically configured for `root` and `neko` only; login renderer lacked conditional demo hints.
+3. Systemd/nftables integration: Default Debian/Raspbian `/etc/nftables.conf` does not include `/etc/nftables.d/*.nft` drop-ins unless explicitly configured.
+4. Display geometry: Fixed 320x240 ILI9341 display runs a 6x8 bitmap font yielding exactly 53 columns by 30 rows; tools assuming 80+ columns overflow.
+
+**Decision:**
+- **WS-1 (Guest Demo Login & nftables Persistence):**
+  - Updated `/etc/whiskerframe.yaml` and `.whiskerframe.example.yaml` to include `guest` under `terminal.login.users` and enable `terminal.login.demo_mode: true`.
+  - Updated `pi/terminal/login_view.py` to conditionally render `"demo: guest / guest"` on the bottom display row when `demo_mode` is enabled.
+  - Fixed nftables persistence in `ansible/roles/guest_demo/tasks/main.yml` by inserting `include "/etc/nftables.d/*.nft"` into `/etc/nftables.conf` and enabling `nftables.service`. Verified 11/11 abuse suite tests pass on cold boot.
+  - Proved real PTY su authentication end-to-end via PAM.
+- **WS-2 (CardKB Sticky Ctrl Latch & Cheatsheet):**
+  - Implemented sequential sticky Ctrl state machine in `pi/terminal/bridge.py` triggered by `Fn+Tab` (`0x8C`).
+  - Next alphanumeric key (`a-z`, `A-Z`, `@ [ \ ] ^ _ space`) is masked with `& 0x1F` to emit standard C0 control codes (`Ctrl+C` = `0x03`, `Ctrl+D` = `0x04`).
+  - Armed state is visually signaled by recoloring the terminal cursor cell to bright yellow (`theme.ansi[11]` / `0xFF11`).
+  - Armed state automatically cancels on 3.0s timeout, toggle press of `Fn+Tab`, or non-qualifying key passthrough.
+  - Deployed `pi/bin/keys` 53-col reference tool and documented all bindings in `docs/dev/keyboard-cheatsheet.md`.
+- **WS-3 (Goodbye Screen & Low-Power Firmware Sleep):**
+  - Deployed `pi/bin/goodbye_hook` rendering a centered 128x128 doodle composited with `"bai baiii"` (or `"brb"` on reboot), holding for ~4 seconds, and wiping to black. Total runtime strictly bounded under 7.5 seconds with fail-silent error handling.
+  - Registered systemd oneshot unit `cyberdeck-goodbye.service` triggered before `shutdown.target`, `reboot.target`, `poweroff.target`, and `halt.target`.
+  - Added additive wire opcode `0x06` (`SLEEP`) to `whiskerframe/protocol.py` and `whiskerframe/terminal.py` for coprocessor display sleep.
+  - Safely parked physical ESP32 flashing per safety guidelines due to absence of local `esptool` and sealed enclosure.
+- **WS-4 (Terminal Network UX):**
+  - Deployed `pi/bin/wifi` (mode 0755) wrapping NetworkManager into a 53-column interface supporting `status`, `scan` (top 10 strongest 2.4 GHz networks), `join` (hidden passphrase entry), and `forget`.
+  - Documented 2.4 GHz only hardware constraints and client isolation workarounds in `docs/dev/network-access.md`.
+- **WS-5 (Offline Documentation & Wiki Helper):**
+  - Installed `bash-doc` and `w3m` on the Pi; deployed `pi/bin/wiki` formatting `man`, `bash-doc`, and `kiwix-serve` queries to <=53 columns.
+  - Authored `docs/dev/offline-library-plan.md` staging Simple English Wikipedia ZIM download via laptop to protect Pi thermal and power envelopes.
+- **WS-6 (Phone Hotspot 2.4 GHz Verification):**
+  - Deployed `~/.local/bin/adb-safe` restricting phone control to approved Settings intents and input commands.
+  - Automated inspection and verified Redmi Note 12 hotspot on Channel 1 (2412 MHz) via read-only Pi scan without breaking the Pi's Wi-Fi link.
+- **WS-7 (Cold Boot Thermals & Readiness):**
+  - Confirmed cold boot idle thermals at 61.2°C (well below 75°C threshold), 0 throttled events, and UPS battery telemetry at 12.42V (~95%).
+
+**Physics & Feasibility Checks:**
+- *UART Serialization Throughput:* 128x128 RGB565 image is 32,768 bytes. At 115,200 baud (11,520 bytes/sec wire throughput), chunked transfer completes in ~2.84s. Black clear takes 2ms. Shutdown sequence easily completes within the 8.0s systemd timeout window.
+- *Memory & CPU Overhead:* Sticky Ctrl state machine evaluates in constant time $O(1)$ on keypress. `keys`, `wifi`, and `wiki` CLI tools use Python standard library without background daemon overhead.
+
+**Tradeoffs / Risk:**
+- CardKB sticky Ctrl requires sequential chord entry (`Fn+Tab` then `c`), requiring user onboarding (mitigated by `keys` command and yellow cursor feedback).
+- ESP32 firmware sleep opcode `0x06` remains staged in protocol library until physical flashing is authorized and verified.
