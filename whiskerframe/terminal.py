@@ -34,6 +34,7 @@ __all__ = [
     "DISPLAY_WIDTH",
     "INT8_MAX",
     "INT8_MIN",
+    "DisplaySleep",
     "DrawCells",
     "DrawImage",
     "Scroll",
@@ -229,3 +230,15 @@ class DrawImage(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+
+class DisplaySleep(BaseModel):
+    """
+    Resolved ``SLEEP`` (``0x06``) command: put CYD display into low-power sleep.
+
+    Commands the CYD firmware to blank the display (DISPOFF + SLPIN), lower
+    the backlight, and clock down the CPU to 80 MHz until the next valid frame.
+    Payload is 0 bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
