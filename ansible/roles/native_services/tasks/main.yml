@@ -210,6 +210,7 @@
       register: fb_installed
       changed_when: false
       failed_when: false
+      check_mode: false
 
     - name: Download the pinned File Browser release tarball
       ansible.builtin.get_url:
