@@ -1,0 +1,12 @@
+---
+# Defaults for self_heal_watchdog role (Phase 3 self-healing & watchdog)
+
+net_heal_check_interval_sec: 30
+net_heal_tier2_threshold_sec: 300  # 5 minutes -> restart NetworkManager
+net_heal_tier3_threshold_sec: 900  # 15 minutes -> reload brcmfmac driver
+net_heal_ping_count: 3
+net_heal_ping_timeout_sec: 2
+net_heal_known_connection: "preconfigured"
+
+watchdog_runtime_sec: "60s"
+watchdog_reboot_sec: "2min"
