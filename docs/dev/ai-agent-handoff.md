@@ -8,12 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi rebooted by operator; on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 60.1°C temp.
-- **Current Task:** Phase 2 Wi-Fi Cold Boot Persistence (Ansible role + check mode + rescue timer).
-- **Last RESULT:** Phase 1 Blocker Survey completed and logged (`docs/dev/ai-recovery/2026-10-14.md`, commit `9f27275`).
+- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 59.6°C temp.
+- **Current Task:** Phase 3 Network Self-Healing & Hardware Watchdog (`fake-hwclock`, escalation script, watchdog timer, heartbeat).
+- **Last RESULT:** Phase 2 Wi-Fi Cold Boot Persistence applied, validated live under Rule 2 rescue timer, simulated boot path reconnected in 1s (DEC-W25, TSK-08).
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Build Ansible role for Wi-Fi persistence; check-mode validate; apply under Rule 2 rescue timer.
+- **Next Action:** Build self-healing script, timer, fake-hwclock install, watchdog config, test self-healing under Rule 2.
 
 ## 1. What this project is
 
@@ -718,6 +718,27 @@ INTENT: [2026-10-14T08:53Z] Phase 2 - Wi-Fi Cold Boot Persistence:
 4. Apply persistence fixes (override rfkill default_state=1, regdom PH, NM powersave 2, autoconnect priority, `/mnt/250GB-SSD/log/journal`).
 5. Simulate boot path (`systemctl restart systemd-rfkill NetworkManager`) under rescue timer, confirm reconnect, cancel timer.
 6. Log DEC-W25 in Documentation Triad.
+
+RESULT: [2026-10-14T09:10Z] Phase 2 Completed:
+1. Role `wifi_persistence` built and check-mode validated (`ansible-playbook --tags wifi_persistence --check site.yml` -> 0 failures).
+2. Deployed live to target Pi under Rule 2 transient rescue timer (`systemd-run --unit=wifi-rescue-phase2 --on-active=120`).
+3. Applied states verified on target: `rfkill default_state=1`, `/var/lib/systemd/rfkill/*:wlan` set to 0, `cmdline.txt` regdom PH, `iw reg get` PH, NM powersave=2 disabled globally and per-connection, autoconnect priority 100 with infinite retries.
+4. Persistent journal directory `/mnt/250GB-SSD/log/journal` created (`2755 root:systemd-journal`), dangling symlink resolved, journald restarted.
+5. Cold boot path simulated without rebooting: detached unit restarted `systemd-rfkill` and `NetworkManager`; automatic reconnection verified within 1 second; gateway ping 10.0.0.1 0% loss; rescue timer safely cancelled.
+6. Documentation Triad synced: DEC-W25 recorded in `docs/dev/ai-decisions.md`, `tasks.md` updated with TSK-08, `changelog.md` updated.
+
+INTENT: [2026-10-14T09:12Z] Phase 3 - Network Self-Healing & Hardware Watchdog:
+1. Package and install `fake-hwclock` to preserve clock monotonicity across cold boots without RTC.
+2. Implement network self-healing script and systemd timer (`~30s` interval):
+   - Ping gateway/default route 3x.
+   - Stage 1 fail escalation: rfkill unblock + radio on + `nmcli device connect wlan0`.
+   - Stage 2 fail escalation (>5m continuous failure): `systemctl restart NetworkManager`.
+   - Stage 3 fail escalation (>15m continuous failure): reload `brcmfmac` kernel module.
+   - Strict constraint: NO automatic reboot in self-healing script.
+3. Configure hardware watchdog (`RuntimeWatchdogSec=15s` in `/etc/systemd/system.conf`) if supported by BCM2835 watchdog driver and confirmed safe against boot loops.
+4. Deploy lightweight heartbeat file logging last-known IP, interface state, and timestamp (`/run/cyberdeck-heartbeat.json`).
+5. Prove self-healing on live deck under Rule 2: simulate failure via `rfkill block wifi` and measure time-to-recovery.
+
 
 
 

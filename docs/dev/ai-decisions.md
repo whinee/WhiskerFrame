@@ -707,3 +707,38 @@ Specifications and follow-up interviews in `docs/dev/spec-interview/` contain hu
 - Hook scripts must fail closed, which could block legitimate agent operations if `/tmp` or the archive directory becomes unwritable.
 - Complex nested bash command strings require conservative regex matching; borderline commands fail closed by design.
 
+---
+
+## DEC-W25: Wi-Fi Cold Boot Persistence, Kernel RFKill Default, & Regulatory Domain Enforcement
+
+**Date:** 2026-10-14
+
+**Problem:**
+Following an unattended cold boot or power-cycle, the Cyberdeck's wireless radio (`wlan0`) initialized in a soft-blocked / disabled state, breaking headless Wi-Fi connectivity and requiring physical keyboard (CardKB) intervention (`nmcli radio all on`). Forensics in Phase 1 identified multiple contributing root causes:
+1. `/etc/modprobe.d/rfkill_default.conf` installed by `raspberrypi-sys-mods` defaulted to `options rfkill default_state=0` (soft-blocked).
+2. Saved systemd rfkill state in `/var/lib/systemd/rfkill/*:wlan` preserved soft-blocked states across reboots.
+3. Wireless regulatory domain was unset (`country 99: DFS-UNSET`), disabling standard channels under FCC/ETSI compliance rules.
+4. Default Wi-Fi power-saving mode (`powersave = 3` / driver default) induced sleep-state dropouts on the `brcmfmac` FullMAC chip.
+5. Persistent journald directory on the SSD (`/mnt/250GB-SSD/log/journal`) was missing, causing `/var/log/journal` to dangle and masking post-boot network failure logs.
+
+**Decision:**
+- **Ansible Role `wifi_persistence`:** Codify all persistence requirements in an idempotent, check-mode validated role (`ansible/roles/wifi_persistence/`) tagged `[wifi_persistence, wifi]` in `ansible/site.yml`.
+- **Kernel RFKill Override:** Configure `options rfkill default_state=1` in `/etc/modprobe.d/rfkill_default.conf` to unblock wireless interfaces at kernel module load.
+- **Bootcmd Regulatory Domain:** Inject `cfg80211.ieee80211_regdom=PH` into `/boot/firmware/cmdline.txt` and synchronize runtime regulatory domain via `iw reg set PH`.
+- **Systemd RFKill State Clean:** Force `/var/lib/systemd/rfkill/*:wlan` files to unblocked state (`0`).
+- **NetworkManager State & Powersave Hardening:** Ensure `NetworkingEnabled=true` and `WirelessEnabled=true` in `/var/lib/NetworkManager/NetworkManager.state`. Deploy `/etc/NetworkManager/conf.d/default-wifi-powersave.conf` globally setting `wifi.powersave = 2` (disabled).
+- **Known Profile Prioritization:** Update `/etc/NetworkManager/system-connections/preconfigured.nmconnection` to `connection.autoconnect=true`, `connection.autoconnect-priority=100`, `connection.autoconnect-retries=0` (indefinite retry), and `wifi.powersave=2`.
+- **Persistent Journal Restoration:** Create `/mnt/250GB-SSD/log/journal` (mode `2755`, owner `root:systemd-journal`) and bind `/var/log/journal` symlink to ensure post-boot crash and connection forensics are retained across boots.
+- **Rule 2 Cold Boot Simulation:** Validate changes without a physical reboot by arming an independent transient rescue timer (`systemd-run --unit=wifi-rescue-sim --on-active=120`), executing `systemctl restart systemd-rfkill NetworkManager` in a detached unit, and verifying automated reconnection within 1 second.
+
+**Physics & Feasibility Checks:**
+- *Radio Power Consumption:* Disabling power save (`wifi.powersave = 2`) on `brcmfmac` maintains continuous RX polling, increasing Wi-Fi idle draw by ~0.15W to 0.25W. On the 35.52 Wh battery pack, active battery life decreases from ~10.1h to ~9.6h—an acceptable trade-off for eliminating headless link dropouts.
+- *Memory & Disk Overhead:* Persistent journal directory is bounded by existing `SystemMaxUse=200M` in `journald_ssd` on the 250GB SSD (231GB free), posing zero exhaustion risk.
+
+**Tradeoffs / Risk:**
+- Disabling power save slightly increases power draw during battery operation.
+- Indefinite autoconnect retries (`autoconnect-retries=0`) will continually scan for known SSIDs if out of range, consuming CPU cycles on the single-core/four-thread BCM2837B0.
+
+---
+
+
