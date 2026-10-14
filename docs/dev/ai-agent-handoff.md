@@ -6,22 +6,13 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- A **Raspberry Pi Zero 2W** (`root@10.0.0.212`, SSH key `/home/lyra/.ssh/id_rsa`)
-  drives an **ESP32 "Cheap Yellow Display" (CYD)** over USB-serial and an
-  **M5Stack CardKB** keypad + **UPS Module 3S** battery board over two I2C buses.
-- **Three Pi pieces are LIVE right now:**
-    - `battery-monitor.service` — reads the UPS INA219, publishes battery status.
-      WORKING (verified: percent/current/status update live).
-    - `terminal.service` — renders a real `bash` login shell on the CYD, typed on
-      the CardKB. RUNNING; login + background just fixed; **awaiting the user to
-      confirm a successful on-device login.**
-    - CYD firmware (custom, flashed) — renders draw commands. WORKING (colors
-      fixed via `invertDisplay(true)`).
-- **The deck is physically assembled and CANNOT be opened/reflashed easily.** The
-  CYD is flashed **via the Pi** (esptool in the Pi venv). See section 6.
-- **Last thing told to the user:** retry login on the CardKB — arrow to user
-  `neko` or `root`, Enter, type that account's real Pi password (masked as `*`),
-  Enter. Expect a clean blurple background + bash shell. See section 8.
+- **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
+- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
+- **Hardware State:** Pi rebooted by operator via CardKB; Wi-Fi restored via `nmcli radio all on`; currently on charger with UPS 3S module.
+- **Current Task:** Phase 1 Read-Only Blocker Survey (`docs/dev/ai-recovery/2026-10-14.md`).
+- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer for any link-risk action; TSK-05 unapplied; 2-strike stop.
+- **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
+- **Next Action:** Execute Phase 1 read-only inspection over SSH without modifying target state.
 
 ## 1. What this project is
 
@@ -670,12 +661,19 @@ Noted. Escaped local  from the post-push checklist.
 - Logged `DEC-W19` (UI customization, font glyph subsetting, deferred LED matrix), `DEC-W20` (storage lifecycle, encrypted sharing, Backrest snapshots), `DEC-W21` (power profiles, telemetry discharge logging), `DEC-W22` (mechanical envelope, acrylic fabrication, drop protection), and `DEC-W23` (tiered bus architecture, Qwiic/USB standardization, edge card deferral) in `docs/dev/ai-decisions.md`.
 - Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
 
-## Q-012 | 2026-10-14T15:05Z | OPEN
+## Q-012 | 2026-10-14T15:05Z | OPEN (PARKED)
 Blocked: Awaiting operator's console bug list for CYD terminal / CardKB on v0 prototype.
-Options: Operator provides full console bug list and observations. Recommended default: Itemized list of reproducible anomalies.
+Options: Operator away; unattended run active. Default: Park question, run automated soak tests on live deck terminal, fix discovered root causes with automated tests.
 Applies to: Priority 1 (Console Bugs), `pi/terminal/`, CYD display link.
-Answer: <awaiting>
-Reply sent: Awaiting operator's console bug list while gathering background evidence and executing Priority 0 safety net.
+Answer: Parked by operator instruction for unattended run (2026-10-14T16:30 local).
+Reply sent: Acknowledged unattended run. Q-012 parked. Proceeding with Phase 1 blocker survey, Wi-Fi persistence, self-heal, safety net, and guest demo role.
+
+INTENT: [2026-10-14T08:38Z] Unattended Run - Phase 1 Read-Only Blocker Survey:
+1. Ground facts on target Pi Zero 2W (`10.0.0.212`) over SSH without changing any system state.
+2. Inspect prior boot journal (`journalctl -b -1`), power metrics (INA219 via battery monitor), throttling (`vcgencmd get_throttled`), temperature, earlyoom, USB resets.
+3. Investigate root cause of "radio off after boot": `nmcli radio`, `rfkill list`, `iw reg get`, `/var/lib/NetworkManager/NetworkManager.state`, `/var/lib/systemd/rfkill/*`, connection profiles, udev rules, Ansible roles.
+4. Check time subsystem (`fake-hwclock`, `systemd-timesyncd`), storage (`btrfs device stats`, free space), memory/swap, and all active/failed services.
+5. Compile full survey and blocker rankings in `docs/dev/ai-recovery/2026-10-14.md`.
 
 ## Q-013 | 2026-10-14T15:30Z | ANSWERED
 Blocked: None. Steering received for branch check, untrack interview folder, and guard hook.
