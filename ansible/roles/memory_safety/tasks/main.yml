@@ -177,6 +177,7 @@
   ansible.builtin.command: "swapon --show=NAME,TYPE --noheadings"
   register: swap_devices
   changed_when: false
+  check_mode: false
 
 - name: Record whether a zram swap is already managed by the system
   ansible.builtin.set_fact:
@@ -265,6 +266,7 @@
   ansible.builtin.command: "swapon --show=NAME,TYPE,PRIO --noheadings"
   register: swap_show
   changed_when: false
+  check_mode: false
 
 - name: Show the active swap layout (zram should outrank the SSD swapfile)
   ansible.builtin.debug:
