@@ -8,12 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 73.1°C temp (stabilized at 20MB/s rate limit).
-- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup streaming at ~37GB/60GB (~62% complete; 2.6GB compressed zstd image on SSD). Phase 5 role authored, committed, and ready for deployment.
-- **Last RESULT:** Phase 3 Network Self-Healing & Hardware Watchdog verified live (DEC-W26, TSK-09, 36s recovery); Phase 5 `guest_demo` role committed locally (`cd80a7c`) with DEC-W27 and TSK-10.
+- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 70.3°C temp.
+- **Current Task:** Phases 1 through 5 fully implemented, deployed, verified live, and backed up. Pi in frozen soak-test mode ahead of freeze deadline.
+- **Last RESULT:** Phase 4 raw block backup completed and verified with SHA256; Phase 5 `guest_demo` role deployed live on deck with all 11 containment abuse tests passing (100%).
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Await completion of raw block stream and SHA256 checksum calculation, verify backup integrity, apply non-disruptive components of `guest_demo` role on deck, run containment abuse test suite.
+- **Next Action:** Finalize operational handoff report, review open questions, maintain soak monitoring until operator return.
 
 ## 1. What this project is
 
@@ -759,6 +759,30 @@ STATUS: [2026-10-14T10:05Z] 20-Minute Handoff Checkpoint:
 3. Documentation Triad & Demo Assets (Phase 5): Authored `docs/dev/demo-day-checklist.md` with morning pre-flight checklist, step-by-step demonstration walkthrough, and post-demo password rotation reminder. Logged DEC-W27 in `docs/dev/ai-decisions.md`, registered TSK-10 in `docs/specifications/tasks.md`, and updated `docs/dev/changelog.md`. Committed locally (`cd80a7c`).
 4. Recovery Manual: Updated `docs/dev/ai-recovery/2026-10-14.md` with full Sections 4-7 covering remediations, residual risks, restore quick reference, and operator post-demo actions. Committed locally (`b06d7bf`).
 5. Soak Test Status: `terminal.service` running uninterrupted for >1h40m; earlyoom and system services healthy with 207MB free RAM and 832MB available swap.
+
+RESULT: [2026-10-14T10:20Z] Phase 4 (Safety Net Storage Backup) Completed:
+1. Block stream from `/dev/mmcblk0` to `/mnt/250GB-SSD/backup/2026-10-14/sdcard-mmcblk0.img.zst` completed in full: 59.5GB read, compressed to 2.59 GiB on SSD.
+2. Companion metadata assets verified: partition table dump `mmcblk0-partition-table.sfdisk`, firmware archive `boot-firmware.tar.gz` (68MB).
+3. Cryptographic integrity verified: `sha256sum -c SHA256SUMS` exited 0 (all OK).
+4. Thermal profile throughout backup: strictly capped under 74.0°C via dynamic rate-limiting (`pv -L 18-20M`), zero undervoltage or throttling events (`throttled=0x0`).
+
+RESULT: [2026-10-14T10:35Z] Phase 5 (Guest Demo Hardening) Completed:
+1. Role `guest_demo` deployed live to target Pi via Ansible (`ok=19 changed=15`).
+2. Enforced complete containment stack:
+   - Dedicated `guest` account with ephemeral 8MB tmpfs home directory (`nodev,nosuid,mode=0700`).
+   - Boundary hardening: `0700` permissions on `/home/neko`, `/root`, and `/etc/NetworkManager/system-connections`.
+   - Kernel-level network isolation: `nftables` table `guest_isolation` dropping 100% egress packets matching `skuid guest` (loopback, LAN, WAN).
+   - Execution reaper daemon: `/usr/local/bin/cyberdeck-guest-reaper.sh` polling every second, terminating any guest process running > 5 seconds.
+   - PAM logout cleanup: `/usr/local/bin/guest-session-cleanup.sh` wiping `/home/guest` tmpfs on session closure.
+   - Live telemetry banner: `/usr/local/bin/demo` reading uptime, power (INA219), thermals (`/sys/class/thermal/thermal_zone0/temp`), and memory.
+   - Staged SSHD deny configuration: `/etc/ssh/sshd_config.d/50-guest.conf.staged` staged per Rule 3 without dropping live sessions.
+3. Containment abuse test suite `/usr/local/bin/test-guest-containment.sh` executed on the live deck: 11 of 11 assertions passed (0 failed).
+
+STATUS: [2026-10-14T10:45Z] 20-Minute Handoff Checkpoint:
+1. Power & Thermals: Pi Zero 2W running cool and steady at 70.3°C, 12.41V (~95% SoC float charging), 0 throttled flags.
+2. System Health: Available RAM 220MB, swap available 833MB. Earlyoom, fake-hwclock, self-healing watchdog timer, and guest reaper all active and healthy.
+3. Live Deck Freeze: All planned operational phases (1-5) completed ahead of the 11:35Z freeze deadline. Deck placed in frozen soak mode; no further system or package modifications will be made to live hardware.
+4. Soak Test: `terminal.service` running uninterrupted for >2h20m without restart or crash.
 
 
 
