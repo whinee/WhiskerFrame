@@ -31,7 +31,7 @@ def _pack_rgb565_be(red: int, green: int, blue: int) -> bytes:
 
 
 def generate_variant(text: str, output_prefix: str) -> tuple[Path, Path]:
-    """Generate both preview PNG and .rgb565 blob for a goodbye variant."""
+    """Generate both preview PNG and .rgb565 blob for a goodbye doodle icon."""
     if not _SOURCE_IMAGE.exists():
         raise FileNotFoundError(f"Source doodle not found: {_SOURCE_IMAGE}")
 
@@ -43,39 +43,24 @@ def generate_variant(text: str, output_prefix: str) -> tuple[Path, Path]:
     thickened_alpha = alpha.filter(ImageFilter.MaxFilter(5))
     src.putalpha(thickened_alpha)
 
-    # 2. Downscale doodle to fit within upper ~96x96 area of 128x128 canvas
-    doodle_size = 96
+    # 2. Downscale doodle to fit within 116x116 area of 128x128 canvas
+    doodle_size = 116
     doodle_thumb = src.resize((doodle_size, doodle_size), Image.Resampling.LANCZOS)
 
-    # 3. Create 128x128 canvas filled with theme background
+    # 3. Create 128x128 canvas filled with theme blurple background
     canvas = Image.new("RGBA", (_CANVAS_SIZE, _CANVAS_SIZE), (*_THEME_BG, 255))
 
-    # Center doodle horizontally, offset slightly towards top
+    # Center doodle within 128x128 canvas
     doodle_x = (_CANVAS_SIZE - doodle_size) // 2
-    doodle_y = 6
+    doodle_y = (_CANVAS_SIZE - doodle_size) // 2
     canvas.alpha_composite(doodle_thumb, (doodle_x, doodle_y))
 
-    # 4. Render subtitle text ("bai baiii" or "brb")
-    draw = ImageDraw.Draw(canvas)
-    # Use default font or load a clean bitmap font
-    font = ImageFont.load_default()
-
-    # Calculate text bounding box
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_x = (_CANVAS_SIZE - text_w) // 2
-    text_y = _CANVAS_SIZE - 20
-
-    # Draw text with subtle shadow for contrast
-    draw.text((text_x + 1, text_y + 1), text, fill=(0, 0, 0, 180), font=font)
-    draw.text((text_x, text_y), text, fill=(*_TEXT_COLOR, 255), font=font)
-
-    # 5. Output Preview PNG (RGB)
+    # 4. Output Preview PNG (RGB)
     rgb_image = canvas.convert("RGB")
     preview_path = _OUTPUT_DIR / f"{output_prefix}-preview.png"
     rgb_image.save(preview_path, format="PNG")
 
-    # 6. Output Big-Endian RGB565 Blob
+    # 5. Output Big-Endian RGB565 Blob
     rgb565_path = _OUTPUT_DIR / f"{output_prefix}.rgb565"
     rgb565_bytes = bytearray()
     for y in range(_CANVAS_SIZE):

@@ -58,6 +58,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "font_8x12.h"
 #include "frame.h"
 
 namespace cyd_display_link {
@@ -139,12 +140,18 @@ inline int32_t& active_cell_height() {
 }
 
 // Cell width/height in pixels for a font_size selector (0 treated as 1),
-// matching whiskerframe/metrics.py (cell_w = 6*N, cell_h = 8*N).
+// matching whiskerframe/metrics.py (cell_w = 6*N, cell_h = 8*N; font 5 = 8x12).
 inline int32_t cell_width_for(uint8_t font_size) {
+  if (font_size == 5) {
+    return 8;
+  }
   const int32_t n = font_size == 0 ? 1 : static_cast<int32_t>(font_size);
   return kCellBaseW * n;
 }
 inline int32_t cell_height_for(uint8_t font_size) {
+  if (font_size == 5) {
+    return 12;
+  }
   const int32_t n = font_size == 0 ? 1 : static_cast<int32_t>(font_size);
   return kCellBaseH * n;
 }
@@ -399,6 +406,18 @@ inline void render_cells(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
     tft.fillRect(base_x, base_y, bg_w, cell_h, bg);
   }
 
+  if (font_size == 5) {
+    for (uint16_t i = 0; i < run_len; ++i) {
+      const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
+      if (cx >= screen_w) {
+        break;
+      }
+      const uint8_t* bmp = glyph_8x12_bitmap(static_cast<char>(glyphs[i]));
+      tft.drawBitmap(cx, base_y, bmp, 8, 12, fg, bg);
+    }
+    return;
+  }
+
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(fg, bg);
   tft.setTextSize(font_size == 0 ? 1 : font_size);
@@ -546,6 +565,20 @@ inline void render_image(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
   const uint16_t* pixels =
       reinterpret_cast<const uint16_t*>(payload + kDrawImageHeaderLen);
   tft.pushImage(x, y, w, h, pixels);
+}
+
+// -- render_sleep (SLEEP 0x06) ----------------------------------------------
+//
+// Put the CYD display link into low-power sleep: fill display black, cut backlight
+// (GPIO 21 LOW), and issue ILI9341_DISPOFF and ILI9341_SLPIN commands.
+inline void render_sleep(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
+  (void)payload;
+  (void)len;
+  tft.fillScreen(TFT_BLACK);
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, LOW);
+  tft.writecommand(ILI9341_DISPOFF);
+  tft.writecommand(ILI9341_SLPIN);
 }
 
 }  // namespace cyd_display_link

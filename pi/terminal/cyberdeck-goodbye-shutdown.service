@@ -1,0 +1,16 @@
+[Unit]
+Description=Cyberdeck Shutdown Splash Screen (bai baiii!)
+DefaultDependencies=no
+After=terminal.service
+Before=shutdown.target umount.target final.target poweroff.target halt.target
+Conflicts=terminal.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cyd-display-link/pi/.venv/bin/python3 /opt/cyd-display-link/pi/bin/goodbye_hook --mode shutdown
+TimeoutSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=poweroff.target halt.target
