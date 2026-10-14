@@ -685,3 +685,25 @@ Desiring a custom edge-card modular bus with EEPROM identification and dynamic p
 
 **Tradeoffs / Risk:**
 - Deferring custom edge-cards means modular hardware hacking in v1 is limited to I2C sensor breakouts and USB dongles.
+
+---
+
+## DEC-W24: Spec-Interview PreToolUse Guard Hook, Human-Ownership Enforcement, & Automated Archiving
+
+**Date:** 2026-10-14
+
+**Problem:**
+Specifications and follow-up interviews in `docs/dev/spec-interview/` contain human-owned ground truths (`0.md`) alongside evolving agent notes and contradictions. Autonomous and parallel agents risk overwriting operator-authored questions or destroying interview state during automated tool runs. Previous attempts to protect `0.md` relied on prompt instructions, which are prone to drift or tool hallucination.
+
+**Decision:**
+- **PreToolUse Hook Guard Architecture:** Implement `/home/lyra/.config/agent-policy/bin/spec-interview-guard` (mode `0555`, owned outside agent-writable repo space) reading tool-call JSON from `stdin`.
+- **Human-Ownership Enforcement (`0.md`):** Strictly deny any tool call writing to `0.md` or executing modifying Bash commands (`>`, `>>`, `tee`, `sed -i`, `rm`, `mv`, `truncate`, `python`, `git`, etc.) with exit code 2. Safe read commands (`cat`, `head`, `tail`, `grep`, `diff`, `stat`, `wc`) are permitted (exit 0) without triggering archives.
+- **Fail-Closed Auto-Archiving:** All other modifications under `docs/dev/spec-interview/` trigger an automated snapshot of the directory to `docs/dev/spec-interview-archives/<timestamp>.tar.gz`. Archiving is protected by `fcntl.flock` on `/tmp/spec-interview-guard.lock`, uses atomic temporary file creation (`os.replace`), and skips duplicate snapshots via a sidecar hash file (`.latest.hash`). If archiving fails for any reason, the tool call fails closed (exit code 2).
+- **Archive Rotation:** Automatically rotate archives to keep the newest 50 (`SPEC_INTERVIEW_ROTATE_LIMIT`), removing only matching `.tar.gz` files.
+- **Safe Inspection Utility:** Deploy `/home/lyra/.config/agent-policy/bin/spec-interview-restore` (mode `0555`) to safely inspect `.tar.gz` archives strictly into `/tmp/spec-interview-restore-XXXXXX` without modifying the working tree or index.
+- **Proposed Adapters:** Provide proposed configurations and unified diffs in `docs/dev/proposed-settings/` for Claude Code PreToolUse, Antigravity CLI, Kiro, and Antigravity IDE without directly mutating active tool configurations.
+
+**Tradeoffs / Risk:**
+- Hook scripts must fail closed, which could block legitimate agent operations if `/tmp` or the archive directory becomes unwritable.
+- Complex nested bash command strings require conservative regex matching; borderline commands fail closed by design.
+
