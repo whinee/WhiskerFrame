@@ -897,3 +897,35 @@ The Whiskerframe Cyberdeck v0 prototype prepared for public demonstration at DIC
 **Tradeoffs / Risk:**
 - CardKB sticky Ctrl requires sequential chord entry (`Fn+Tab` then `c`), requiring user onboarding (mitigated by `keys` command and yellow cursor feedback).
 - ESP32 firmware sleep opcode `0x06` remains staged in protocol library until physical flashing is authorized and verified.
+
+---
+
+## DEC-W30: CardKB Hardware NeoPixel LED Feedback, Short Shell Prompts, Split Systemd Goodbye Units, and NetworkManager Join Hardening
+
+**Date:** 2026-10-15
+
+**Problem:**
+Following operator hardware evaluation of the Demo Polish suite:
+1. Operator requested hardware LED feedback on CardKB: when `Ctrl` is latched via `Fn + Tab`, the CardKB NeoPixel should illuminate yellow (matching uppercase red, sym green, and fn blue).
+2. Keyboard cheatsheet used ambiguous terminology: "Fn + Del" was confusing because the top-right key is physically labeled `del` on the CardKB matrix, but functions as Backspace in normal layers and Del on Shift.
+3. Interactive shell prompts were too long for 53x30 and 26x15 display geometries, consuming over half the line (`neko@pi-midori-neko:~/$ `). Operator requested `n~ ` for neko, `g~ ` for guest, and `r# ` for root.
+4. Display geometry expansion: Operator requested an intermediate geometry between Font 1 (53x30) and Font 2 (26x15).
+5. `wifi join <#>` failed with `Error: 802-11-wireless-security.key-mgmt: property is missing` when executed on secured networks without a password or when NetworkManager profile creation required explicit key-mgmt.
+6. `sudo reboot` froze on the CYD display link without showing the "brb :3" splash screen, and boot splash was immediately overwritten by the login screen.
+
+**Root Cause:**
+1. CardKB Hardware Protocol: Stock ATmega328P firmware implements an I2C slave receiver supporting opcode `0x13 [r, g, b]` to set the onboard SK6812 NeoPixel color and opcode `0x11` to turn it off. Bridge lacked I2C write integration.
+2. Terminology: Physical CardKB layout labels the top-right key `del`. The key emits `0x08` (ASCII BS) alone, `0x7F` (ASCII DEL) with Shift, and `0x8B` with Fn.
+3. Shell Configuration: User `.bashrc` in Debian/Raspbian runs after `/etc/profile.d/`, resetting `PS1` to standard long prompts.
+4. Font Scaling Hardware Limitation: TFT_eSPI bitmap font renderer on ESP32 coprocessor scales 6x8 bitmap cells via integer multipliers (`setTextSize(1)` -> 6x8, `setTextSize(2)` -> 12x16). No integer exists between 1 and 2; intermediate geometries (e.g., 8x12 -> 40x20) require compiling custom smooth bitmap fonts into ESP32 firmware (parked for v0; logged as v1 REQ-HW-FONT-01).
+5. NetworkManager Automation: `nmcli dev wifi connect <ssid>` failed when called with an empty password on secured WPA networks, and existing saved connection profiles were not prioritized.
+6. Goodbye Hook Execution Environment: `pi/bin/goodbye_hook` was invoked by systemd with system Python (`/usr/bin/python3`) lacking venv packages, catching `ImportError` and exiting immediately with 0. The reboot target detection was hardcoded to shutdown. In addition, `bridge.py` had no hold delay after `_show_splash()`, causing the login screen to overwrite the frame immediately.
+
+**Decision:**
+- **CardKB NeoPixel Hardware Control:** Added `set_led(r, g, b)` (opcode `0x13`) and `clear_led()` (opcode `0x11`) to `pi/cardkb/reader.py`. Updated `pi/terminal/bridge.py` and `pi/terminal/daemon.py` to pass the CardKB instance and drive the NeoPixel yellow (`255, 200, 0`) whenever `Ctrl` is latched, clearing on unarm.
+- **Cheatsheet Clarification:** Updated `pi/bin/keys` and `docs/dev/keyboard-cheatsheet.md` to document `Fn + Backspace (top-right key, labeled 'del')` and NeoPixel yellow illumination.
+- **Short Shell Prompts:** Deployed `/etc/profile.d/cyd_prompt.sh` defining `n~ ` (neko), `g~ ` (guest), and `r# ` (root). Sourced in `/etc/bash.bashrc`, `/home/neko/.bashrc`, `/etc/skel/.bashrc`, and `/root/.bashrc`.
+- **Display Geometry Constraint:** Documented TFT_eSPI integer multiplier constraint for v0; logged custom smooth font 8x12 (40x20 grid) as v1 requirement REQ-HW-FONT-01.
+- **Wi-Fi Helper Hardening:** Updated `pi/bin/wifi` to prioritize saved profiles via `nmcli connection up id <profile>`, require passwords on secured APs with clear error feedback, and retry with explicit `wifi-sec.key-mgmt wpa-psk` if NetworkManager throws property errors.
+- **Split Systemd Goodbye Units:** Created distinct systemd units `cyberdeck-goodbye-reboot.service` (`WantedBy=reboot.target`, `--mode reboot` with `"brb :3"`) and `cyberdeck-goodbye-shutdown.service` (`WantedBy=poweroff.target halt.target`, `--mode shutdown` with `"bai baiii!"`) executing under the venv Python binary. Added 3.0s display hold in `TerminalBridge._show_splash()`.
+
