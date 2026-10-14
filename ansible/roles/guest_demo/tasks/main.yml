@@ -1,0 +1,142 @@
+---
+# Tasks for guest_demo role (Phase 5 public demonstration containment)
+# Implements REQ-OPS-04: unprivileged guest user, kernel-level nftables isolation,
+# cgroup limits, 5s process reaper, ephemeral tmpfs home, and abuse test suite.
+
+# --- 1. User & Ephemeral Storage -------------------------------------------
+- name: Ensure guest group exists
+  ansible.builtin.group:
+    name: "{{ guest_user }}"
+    state: present
+
+- name: Ensure guest user exists with restricted shell
+  ansible.builtin.user:
+    name: "{{ guest_user }}"
+    group: "{{ guest_user }}"
+    groups: []
+    password: "{{ guest_password_hash }}"
+    shell: /bin/bash
+    home: "{{ guest_home }}"
+    create_home: true
+    state: present
+
+- name: Ensure guest home directory is mounted as ephemeral tmpfs
+  ansible.posix.mount:
+    path: "{{ guest_home }}"
+    src: tmpfs
+    fstype: tmpfs
+    opts: "nodev,nosuid,size={{ guest_tmpfs_size }},mode=0700,uid={{ guest_user }},gid={{ guest_user }}"
+    state: mounted
+  when: not ansible_check_mode
+
+# --- 2. Filesystem & Privacy Boundaries ------------------------------------
+- name: Restrict permissions on /home/neko
+  ansible.builtin.file:
+    path: /home/neko
+    mode: "0700"
+
+- name: Restrict permissions on /root
+  ansible.builtin.file:
+    path: /root
+    mode: "0700"
+
+- name: Restrict permissions on NetworkManager system connections
+  ansible.builtin.file:
+    path: /etc/NetworkManager/system-connections
+    mode: "0700"
+
+# --- 3. Kernel-Level Network Isolation (nftables) -------------------------
+- name: Ensure nftables configuration directory exists
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy guest network isolation nftables ruleset
+  ansible.builtin.template:
+    src: guest_isolation.nft.j2
+    dest: /etc/nftables.d/guest_isolation.nft
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply guest isolation nftables ruleset
+  ansible.builtin.command:
+    cmd: "nft -f /etc/nftables.d/guest_isolation.nft"
+  changed_when: false
+  when: not ansible_check_mode
+
+# --- 4. Cgroups & Resource Limits -----------------------------------------
+- name: Deploy guest ulimits configuration
+  ansible.builtin.template:
+    src: 50-guest-limits.conf.j2
+    dest: /etc/security/limits.d/50-guest.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy guest process reaper script
+  ansible.builtin.template:
+    src: cyberdeck-guest-reaper.sh.j2
+    dest: /usr/local/bin/cyberdeck-guest-reaper.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy guest process reaper systemd service
+  ansible.builtin.template:
+    src: cyberdeck-guest-reaper.service.j2
+    dest: /etc/systemd/system/cyberdeck-guest-reaper.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: reaper_unit
+
+- name: Enable and start cyberdeck-guest-reaper service
+  ansible.builtin.systemd:
+    name: cyberdeck-guest-reaper.service
+    daemon_reload: "{{ reaper_unit.changed }}"
+    enabled: true
+    state: restarted
+  when: not ansible_check_mode
+
+# --- 5. Ephemeral Session Cleanup ------------------------------------------
+- name: Deploy guest session logout cleanup script
+  ansible.builtin.template:
+    src: guest-session-cleanup.sh.j2
+    dest: /usr/local/bin/guest-session-cleanup.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure PAM session cleanup in common-session
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/common-session
+    line: "session optional pam_exec.so seteuid /usr/local/bin/guest-session-cleanup.sh"
+    insertafter: EOF
+    state: present
+
+# --- 6. Demo Tooling & Staged SSHD -----------------------------------------
+- name: Deploy demo banner command
+  ansible.builtin.template:
+    src: demo.j2
+    dest: /usr/local/bin/demo
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy guest containment test suite
+  ansible.builtin.template:
+    src: test-guest-containment.sh.j2
+    dest: /usr/local/bin/test-guest-containment.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Stage sshd deny configuration without applying (Rule 3)
+  ansible.builtin.copy:
+    content: "# STAGED per Rule 3 - do not apply until operator returns\nDenyUsers {{ guest_user }}\n"
+    dest: /etc/ssh/sshd_config.d/50-guest.conf.staged
+    mode: "0644"

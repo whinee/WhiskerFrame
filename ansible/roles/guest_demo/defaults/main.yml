@@ -1,0 +1,16 @@
+---
+# Defaults for guest_demo role (Phase 5 public demonstration containment)
+
+guest_user: "guest"
+# SHA-512 crypt hash for password "guest" (salt: cyberdeck)
+guest_password_hash: "$6$cyberdeck$mhxfwJiTcuG/BQtgSXTPRIgsDR7oxH1Q4e8Ji.bQIWwfkgoYbS7kNjHYUzXHFpkIh2c/Q79h9OEkjBejDKxfW."
+
+guest_home: "/home/guest"
+guest_tmpfs_size: "8M"
+guest_memory_max: "64M"
+guest_tasks_max: 30
+guest_cpu_quota: "50%"
+guest_process_timeout_sec: 5
+
+# Staged sshd hardening (never applied automatically per Rule 3)
+guest_demo_apply_sshd: false

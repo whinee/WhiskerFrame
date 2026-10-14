@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Managed by Ansible: guest_demo role
+# Test suite for verifying kernel-level containment of guest user account.
+
+set -u
+
+GUEST_USER="{{ guest_user }}"
+PASS=0
+FAIL=0
+
+assert_denied() {
+    local desc="$1"
+    local cmd="$2"
+    if su - "$GUEST_USER" -c "$cmd" >/dev/null 2>&1; then
+        echo "[-] FAIL: $desc (command unexpectedly succeeded)"
+        FAIL=$((FAIL + 1))
+    else
+        echo "[+] PASS: $desc (correctly denied)"
+        PASS=$((PASS + 1))
+    fi
+}
+
+echo "=== GUEST CONTAINMENT ABUSE TEST SUITE ==="
+
+# 1. Network Isolation
+echo "--- Testing Network Isolation (nftables) ---"
+assert_denied "Egress to local loopback (127.0.0.1)" "ping -c 1 -W 1 127.0.0.1"
+assert_denied "HTTP access to local File Browser (127.0.0.1:8080)" "curl -s --connect-timeout 2 http://127.0.0.1:8080"
+assert_denied "HTTP access to local Syncthing (127.0.0.1:8384)" "curl -s --connect-timeout 2 http://127.0.0.1:8384"
+assert_denied "Egress to external gateway" "ping -c 1 -W 1 10.0.0.1"
+assert_denied "Egress to public internet" "ping -c 1 -W 1 1.1.1.1"
+
+# 2. Filesystem & Secret Isolation
+echo "--- Testing Filesystem & Privacy Boundaries ---"
+assert_denied "Read access to /home/neko" "ls /home/neko"
+assert_denied "Read access to /root" "ls /root"
+assert_denied "Read access to NetworkManager connection secrets" "ls /etc/NetworkManager/system-connections"
+assert_denied "Access to sudo" "sudo -n true"
+assert_denied "Access to su" "su -c true neko"
+
+# 3. Process Execution Time Limit (5s Reaper)
+echo "--- Testing 5s Process Reaper ---"
+START_T=$(date +%s)
+su - "$GUEST_USER" -c "sleep 12" >/dev/null 2>&1 || true
+END_T=$(date +%s)
+ELAPSED=$((END_T - START_T))
+if [ "$ELAPSED" -le 7 ]; then
+    echo "[+] PASS: Subprocess killed within $ELAPSED seconds (<= 7s)"
+    PASS=$((PASS + 1))
+else
+    echo "[-] FAIL: Subprocess ran for $ELAPSED seconds (> 7s, reaper failed)"
+    FAIL=$((FAIL + 1))
+fi
+
+echo "=== RESULTS: $PASS passed, $FAIL failed ==="
+[ "$FAIL" -eq 0 ] && exit 0 || exit 1

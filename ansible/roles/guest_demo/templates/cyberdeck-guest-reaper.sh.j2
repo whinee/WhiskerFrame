@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Managed by Ansible: guest_demo role
+# Enforces 5s wall-clock execution limit on any guest process (excluding top-level login shell).
+
+set -u
+
+GUEST_USER="{{ guest_user }}"
+TIMEOUT_S={{ guest_process_timeout_sec }}
+
+while true; do
+    PIDS=$(pgrep -u "$GUEST_USER" 2>/dev/null || true)
+    if [ -n "$PIDS" ]; then
+        for PID in $PIDS; do
+            [ -d "/proc/$PID" ] || continue
+            COMM=$(cat "/proc/$PID/comm" 2>/dev/null || true)
+
+            # Exclude login shell (-bash or bash directly attached to terminal/pty)
+            PPID_VAL=$(awk '/PPid:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "1")
+            if [ "$COMM" = "bash" ] || [ "$COMM" = "-bash" ]; then
+                PARENT_USER=$(ps -o user= -p "$PPID_VAL" 2>/dev/null | tr -d ' ' || echo "root")
+                if [ "$PARENT_USER" != "$GUEST_USER" ]; then
+                    continue
+                fi
+            fi
+
+            # Check elapsed runtime
+            ETIMES=$(ps -o etimes= -p "$PID" 2>/dev/null | tr -d ' ' || echo "0")
+            if [ -n "$ETIMES" ] && [ "$ETIMES" -ge "$TIMEOUT_S" ]; then
+                logger -t guest-reaper "Terminating guest process $PID ($COMM) exceeding ${TIMEOUT_S}s runtime (elapsed: ${ETIMES}s)"
+                kill -9 "$PID" 2>/dev/null || true
+            fi
+        done
+    fi
+    sleep 1
+done

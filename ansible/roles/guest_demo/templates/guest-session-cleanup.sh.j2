@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Managed by Ansible: guest_demo role
+# Ephemeral home directory cleanup for guest on session logout.
+
+GUEST_USER="{{ guest_user }}"
+GUEST_HOME="{{ guest_home }}"
+
+if [ "${PAM_USER:-}" = "$GUEST_USER" ] && [ "${PAM_TYPE:-}" = "close_session" ]; then
+    logger -t guest-cleanup "Wiping ephemeral home directory for $GUEST_USER on session close"
+    find "$GUEST_HOME" -mindepth 1 -delete 2>/dev/null || true
+    cp -r /etc/skel/. "$GUEST_HOME/" 2>/dev/null || true
+    chown -R "$GUEST_USER:$GUEST_USER" "$GUEST_HOME" 2>/dev/null || true
+    chmod 0700 "$GUEST_HOME" 2>/dev/null || true
+fi

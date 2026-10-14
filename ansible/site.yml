@@ -28,6 +28,9 @@
     # Native self-hosted services (Git, Syncthing, NetBird, File Browser)
     - role: native_services
       tags: [native_services]
+    # Guest demo user & kernel-level isolation (Phase 5)
+    - role: guest_demo
+      tags: [guest_demo, demo]
     # Offline network automation (client mode + fallback AP) — TSK-05. STAGED by
     # default: network_automation_apply=false means a plain `site.yml` installs
     # config/units but does NOT cut the live network on this headless remote box.

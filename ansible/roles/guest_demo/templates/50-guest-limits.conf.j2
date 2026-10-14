@@ -1,0 +1,9 @@
+# Managed by Ansible: guest_demo role
+# Strict ulimits for unprivileged guest demo user
+
+{{ guest_user }}    hard    maxlogins       1
+{{ guest_user }}    hard    nofile          256
+{{ guest_user }}    soft    nofile          128
+{{ guest_user }}    hard    fsize           8192
+{{ guest_user }}    soft    fsize           4096
+{{ guest_user }}    hard    core            0

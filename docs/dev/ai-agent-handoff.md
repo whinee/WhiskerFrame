@@ -8,12 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 59.1°C temp.
-- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup (`dd | zstd -T1`, boot/firmware tarball, partition table, restore procedure).
+- **Hardware State:** Pi running on charger with UPS 3S module; 12.40V (94-95%), 0 throttled flags, 72.0°C temp (stabilized under 12MB/s rate limit).
+- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup streaming in progress (~18GB/60GB read, compressed to 2.3GB zstd; thermal throttle active) + Phase 5 Demo role authored and validated in check mode.
 - **Last RESULT:** Phase 3 Network Self-Healing & Hardware Watchdog verified live (DEC-W26, TSK-09, 36s recovery).
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Verify power margins, create /mnt/250GB-SSD/backup/, run ionice/nice dd | zstd -T1 backup, record SHA-256 and restore SOP.
+- **Next Action:** Monitor completion of SD backup, compute SHA256 checksums, apply non-disruptive components of `guest_demo` role on deck, run containment abuse test suite.
 
 ## 1. What this project is
 
@@ -747,15 +747,12 @@ RESULT: [2026-10-14T09:23Z] Phase 3 Completed:
 5. Proven live on hardware under Rule 2 rescue timer (`wifi-rescue-proof`): `rfkill block wifi` executed; self-heal detected failure and restored gateway ping within exactly 36 seconds; rescue timer cancelled cleanly.
 6. Documentation Triad synced: DEC-W26 logged, `tasks.md` updated with TSK-09, `changelog.md` updated.
 
-INTENT: [2026-10-14T09:25Z] Phase 4 - Local SD-to-SSD Safety Net Backup:
-1. Validate power margins: verify battery voltage >40% (>11.5V on 3S), positive or float charge current, zero throttling (`vcgencmd get_throttled`), temp <75°C.
-2. Audit target storage on external SSD: verify `/mnt/250GB-SSD` has sufficient space (>20GB free for compressed 32GB SD image).
-3. Create dedicated backup directory `/mnt/250GB-SSD/backup/`.
-4. Capture partition table structure (`sfdisk -d /dev/mmcblk0`) and tarball `/boot/firmware`.
-5. Execute throttled, low-priority local streaming image:
-   `nice -n 19 ionice -c 3 dd if=/dev/mmcblk0 bs=4M conv=sync,noerror status=progress | zstd -T1 -3 > /mnt/250GB-SSD/backup/sd-card-crash-consistent.img.zst`.
-6. Continuously monitor power, temperature, and swap during the backup job.
-7. Generate SHA-256 checksums and author comprehensive disaster recovery and restore SOP in `docs/dev/disaster-recovery.md`.
+STATUS: [2026-10-14T09:45Z] 20-Minute Handoff Checkpoint:
+1. Power & Thermals: Pi Zero 2W on charger with UPS 3S module at 12.40V (~94% SoC), float charge current (0.2mA-0.3mA), throttled=0x0 (zero undervoltage/throttling events). When continuous full-speed read briefly pushed temps to 75.2°C, pipeline was paused via SIGSTOP for 30s to cool to 71.4°C, then resumed with rate limit stabilized at 12 MB/s (`pv -R 6264 -L 12M`), holding temp stable at 72.0°C.
+2. Backup Progress (Phase 4): Partition table dumped to `mmcblk0-partition-table.sfdisk`, `/boot/firmware` archived to `boot-firmware.tar.gz` (68MB), raw SD card stream `sdcard-mmcblk0.img.zst` active at ~18GB/60GB read (~2.3GB compressed on SSD). Disaster recovery manual completed in `docs/dev/disaster-recovery.md`.
+3. Parallel Work (Phase 5): Drafted `ansible/roles/guest_demo` implementing REQ-OPS-04 (unprivileged `guest` user, ephemeral 8MB tmpfs home, 0700 privacy boundaries on `/home/neko` and `/root`, kernel-level `nftables` isolation dropping all guest egress, cgroup slice limits, 5s process reaper service, PAM logout cleanup, demo telemetry banner, containment test suite, and staged sshd deny per Rule 3). Validated in Ansible check mode (`ok=16 changed=13 failed=0`).
+4. Console Soak Test: `terminal.service` verified active on live deck (>1h20m continuous uptime without restarts or crashes). Codebase audited for CardKB debouncing and PTY signal propagation.
+
 
 
 
