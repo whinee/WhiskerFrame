@@ -6,14 +6,14 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
-- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 70.3°C temp.
-- **Current Task:** Phases 1 through 5 fully implemented, deployed, verified live, and backed up. Pi in frozen soak-test mode ahead of freeze deadline.
-- **Last RESULT:** Phase 4 raw block backup completed and verified with SHA256; Phase 5 `guest_demo` role deployed live on deck with all 11 containment abuse tests passing (100%).
-- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
-- **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Finalize operational handoff report, review open questions, maintain soak monitoring until operator return.
+- **Session Context:** Attended mode active (operator awake, watching). Pi mutations allowed until 05:30 PHST Oct 15; host work until 06:30.
+- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Power-cycled via UPS switch; waiting for ping.
+- **Hardware State:** Cold boot in progress; survey on first ping.
+- **Current Task:** Launching WS-1 through WS-9 in parallel (host work first, serial Pi lane for mutations).
+- **Last RESULT:** Checkpoint push at d6e06c8; phases 1-5 verified.
+- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer for link risk; TSK-05 unapplied; credentials redacted.
+- **Open Blockers:** None blocking host work. Pi lane awaits ping.
+- **Next Action:** Fan out host-only workstreams WS-2, WS-3a, WS-4, WS-6, WS-8, WS-9 immediately.
 
 ## 1. What this project is
 
@@ -789,6 +789,24 @@ STATUS: [2026-10-14T10:43Z] Checkpoint Push Executed:
 - Target: `origin/agent/2026-10-07-initial` @ commit `d6e06c8`.
 - Gitleaks verification: 0 secrets detected. Vault format: verified.
 - Branch is synchronized with upstream. Awaiting operator PR merge.
+
+---
+
+## 2026-10-15 00:00 UTC — Lead Orchestrator — Demo Preparation & Execution Wave
+
+INTENT: [2026-10-15T00:00Z] Orchestration Wave 1 — Host Parallel Workstreams & Pi Lane Setup:
+1. Verify repository state, branch `agent/2026-10-07-initial`, presence of `0.md` (read-only).
+2. Pi Lane: Poll 10.0.0.212 with backoff. Once up, run read-only boot survey (uptime, throttled, temp, free -m, failed units, journal -b -1 tail).
+3. WS-1 (Guest Login): Update terminal config to include guest, add demo login hint ("guest / guest"), prepare end-to-end PTY login simulation tests.
+4. WS-2 (Ctrl Latch & Cheat Sheet): Inspect reader.py byte table, choose Fn-layer chord, implement sticky Ctrl latch with 3s timeout & cursor cell recolor, add unit tests & probe, author docs/dev/keyboard-cheatsheet.md, add keys CLI.
+5. WS-3 (Goodbye Screen & Firmware Sleep): Move doodles from assets/images/cess/ to assets/images/lyra/ with README; build goodbye splash compositing & shutdown hook; prepare additive firmware sleep opcode (0x06).
+6. WS-4 (Network UX): Implement `wifi` CLI (status, scan, join, forget), author docs/dev/network-access.md with 2.4GHz hotspot & fallback instructions.
+7. WS-5 (Offline Library Plan): Author docs/dev/offline-library-plan.md; prepare staged Kiwix/man-db deployment.
+8. WS-6 (Phone Hotspot): Create ~/.local/bin/adb-safe (mode 755), audit device connection, execute 2.4GHz band switch under strict verification guards.
+9. WS-7 (Thermals & Readiness): Await Pi boot survey, diagnose ~69C idle cause, recommend mitigations.
+10. WS-8 (Spec, Interview & Docs): Process Sections A & 1 followups, keep contradictions.md updated (C-01 blocker, C-02), draft REQs with v0/v1/v2 tags.
+11. WS-9 (Hygiene): Verify spec-interview-guard, verify git status & hooks.
+
 
 
 
