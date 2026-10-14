@@ -64,6 +64,9 @@ if TYPE_CHECKING:
     from .grid import CellRun
 
 __all__ = [
+    "CTRL_LATCH_CHORD",
+    "CTRL_LATCH_CHORDS",
+    "CTRL_LATCH_TIMEOUT_S",
     "RESIZE_CHORD",
     "RESIZE_CHORDS",
     "RESIZE_SIZES",
@@ -71,6 +74,23 @@ __all__ = [
     "KeyQueue",
     "TerminalBridge",
 ]
+
+CTRL_LATCH_CHORD: int = 0x8C
+CTRL_LATCH_CHORDS: frozenset[int] = frozenset({0x8C})
+"""CardKB bytes that latch the Ctrl modifier for the next key: Fn+Tab (0x8C / 140)."""
+
+CTRL_LATCH_TIMEOUT_S: float = 3.0
+"""Window in seconds before an armed Ctrl modifier latch times out."""
+
+_CTRL_VALID_CHARS: frozenset[int] = frozenset(
+    # a-z (0x61-0x7A)
+    set(range(ord("a"), ord("z") + 1))
+    # A-Z (0x41-0x5A)
+    | set(range(ord("A"), ord("Z") + 1))
+    # @ (0x40), [ (0x5B), \ (0x5C), ] (0x5D), ^ (0x5E), _ (0x5F), space (0x20)
+    | {ord("@"), ord("["), ord("\\"), ord("]"), ord("^"), ord("_"), ord(" ")},
+)
+"""Keys that accept the Ctrl latch modifier, emitted as `char & 0x1F`."""
 
 RESIZE_CHORD: int = 0x8B
 RESIZE_CHORDS: frozenset[int] = frozenset({0x8B})
@@ -199,6 +219,7 @@ class BridgeConfig:
     password_mask: str = "*"  # noqa: S105 - a display mask glyph, not a secret
     splash_rgb565: str = ""
     theme: Theme = field(default_factory=load_theme)
+    demo_mode: bool = False
 
 
 def _tiocswinsz(fd: int, geometry: TerminalGeometry) -> None:
@@ -475,6 +496,8 @@ class TerminalBridge:
         `str | None`: Username on successful auth, else ``None``.
 
         """
+        if key in CTRL_LATCH_CHORDS:
+            return None
         submit = state.feed_key(key)
         if submit is None:
             self._render_login_screen(state, "")
@@ -505,6 +528,7 @@ class TerminalBridge:
             self._geometry.cols,
             self._geometry.rows,
             error=error,
+            demo_mode=self._config.demo_mode,
         )
         self._paint(grid)
 
@@ -753,6 +777,33 @@ class _ShellSession:
         )
         self._emulator = VTEmulator(self._grid, bridge._theme)
         self._last_keyframe = time.monotonic()
+        self._ctrl_armed: bool = False
+        self._ctrl_armed_at: float = 0.0
+
+    def _is_ctrl_armed(self) -> bool:
+        """
+        Return whether the sticky Ctrl modifier latch is currently armed.
+
+        A latch automatically expires if more than :data:`CTRL_LATCH_TIMEOUT_S`
+        seconds elapse without a qualifying keystroke.
+
+        Returns:
+        `bool`: ``True`` if armed and unexpired, else ``False``.
+
+        """
+        if not self._ctrl_armed:
+            return False
+        if time.monotonic() - self._ctrl_armed_at > CTRL_LATCH_TIMEOUT_S:
+            self._ctrl_armed = False
+            return False
+        return True
+
+    def _drain_startup(self) -> None:
+        """Drain startup output until quiet or timeout."""
+        deadline = time.monotonic() + _SHELL_STARTUP_MAX_S
+        while time.monotonic() < deadline:
+            if not self._select_pty(_SHELL_STARTUP_QUIET_S) or not self._fetch_and_feed_pty():
+                break
 
     def pump(self) -> None:
         """
@@ -766,35 +817,36 @@ class _ShellSession:
         `None`: Returns when the shell session ends.
 
         """
-        # Drain the shell's startup output (su's PAM session + bash login files
-        # + the first prompt) before the first paint. su can take a beat to emit
-        # the prompt, so instead of a fixed cursor probe we read until the PTY
-        # goes quiet (no bytes for one poll) or a hard ceiling elapses -- this is
-        # why the prompt used to need extra Enter presses to appear.
-        deadline = time.monotonic() + _SHELL_STARTUP_MAX_S
-        while time.monotonic() < deadline:
-            if not self._select_pty(_SHELL_STARTUP_QUIET_S):
-                break  # no output for a full poll: startup settled
-            if not self._fetch_and_feed_pty():
-                break  # EOF/exit during startup
+        self._drain_startup()
         self._paint_session()
         running = True
         while running:
             running = self._read_pty()
+            was_armed = self._ctrl_armed
             self._drain_keys()
+            if was_armed and not self._is_ctrl_armed():
+                self._paint_session()
             self._maybe_keyframe()
 
     def _paint_session(self) -> None:
         """
         Paint the shell grid with the cursor highlighted to the display.
 
+        When the sticky Ctrl modifier is armed, the cursor cell is recolored
+        using the bright yellow ANSI color to provide an unambiguous visual cue.
+
         Returns:
         `None`: The grid with cursor is diffed and sent.
 
         """
+        cursor_bg = (
+            self._bridge._theme.ansi[11]
+            if self._is_ctrl_armed()
+            else self._bridge._theme.cursor
+        )
         display_grid = self._grid.render_with_cursor(
             cursor_fg=self._bridge._theme.bg,
-            cursor_bg=self._bridge._theme.cursor,
+            cursor_bg=cursor_bg,
         )
         self._bridge._paint(display_grid)
 
@@ -869,6 +921,53 @@ class _ShellSession:
             return bytes((key,))
         return None
 
+    def _handle_chord(self, key: int) -> bool | None:
+        """
+        Handle resize or Ctrl latch chords, returning bool if handled.
+
+        Args:
+        - key (`int`): Key byte to check against registered chords.
+
+        Returns:
+        `bool | None`: ``True`` if handled and consumed, else ``None``.
+
+        """
+        if key in RESIZE_CHORDS:
+            if self._ctrl_armed:
+                self._ctrl_armed = False
+            self._grid = self._bridge._rebuild_geometry(self._master_fd)
+            self._emulator = VTEmulator(self._grid, self._bridge._theme)
+            self._paint_session()
+            return True
+
+        if key in CTRL_LATCH_CHORDS:
+            if self._is_ctrl_armed():
+                self._ctrl_armed = False
+            else:
+                self._ctrl_armed = True
+                self._ctrl_armed_at = time.monotonic()
+            self._paint_session()
+            return True
+
+        return None
+
+    def _consume_latch_payload(self, key: int) -> bytes | None:
+        """
+        Consume armed latch and resolve modified or pass-through payload.
+
+        Args:
+        - key (`int`): Keystroke byte presented to the armed latch.
+
+        Returns:
+        `bytes | None`: Resolved PTY payload.
+
+        """
+        self._ctrl_armed = False
+        self._paint_session()
+        if key in _CTRL_VALID_CHARS:
+            return bytes((key & 0x1F,))
+        return self._resolve_key_payload(key)
+
     def _process_single_key(self, key: int) -> bool:
         """
         Process a single pending key from CardKB.
@@ -880,12 +979,15 @@ class _ShellSession:
         `bool`: ``True`` to continue processing keys, ``False`` on fatal write error.
 
         """
-        if key in RESIZE_CHORDS:
-            self._grid = self._bridge._rebuild_geometry(self._master_fd)
-            self._emulator = VTEmulator(self._grid, self._bridge._theme)
-            self._paint_session()
-            return True
-        payload = self._resolve_key_payload(key)
+        chord_handled = self._handle_chord(key)
+        if chord_handled is not None:
+            return chord_handled
+
+        payload = (
+            self._consume_latch_payload(key)
+            if self._is_ctrl_armed()
+            else self._resolve_key_payload(key)
+        )
         if payload is None:
             return True
         try:
