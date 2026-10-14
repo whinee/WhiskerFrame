@@ -62,6 +62,18 @@
     group: root
     mode: "0644"
 
+- name: Include drop-in rulesets in nftables.conf
+  ansible.builtin.lineinfile:
+    path: /etc/nftables.conf
+    line: 'include "/etc/nftables.d/*.nft"'
+    state: present
+
+- name: Enable and start nftables service for persistence
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
 - name: Apply guest isolation nftables ruleset
   ansible.builtin.command:
     cmd: "nft -f /etc/nftables.d/guest_isolation.nft"
