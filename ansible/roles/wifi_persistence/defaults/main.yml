@@ -1,0 +1,10 @@
+---
+# Defaults for wifi_persistence role (Phase 2 cold boot survival)
+wifi_regdom: "PH"
+rfkill_default_state: 1
+nm_powersave: 2  # 2 = disable powersave, 3 = enable, 0 = default
+wifi_connection_name: "preconfigured"
+wifi_connection_file: "/etc/NetworkManager/system-connections/preconfigured.nmconnection"
+autoconnect_priority: 100
+autoconnect_retries: 0  # 0 = retry indefinitely
+journald_ssd_dir: "{{ ssd_mount_point }}/log/journal"

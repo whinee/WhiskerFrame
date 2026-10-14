@@ -1,0 +1,107 @@
+---
+# Tasks for wifi_persistence role
+# Root-cause fix for Wi-Fi cold boot dropouts and radio disabled state.
+
+# --- 1. Persistent Journaling on SSD -------------------------------------
+- name: Ensure journal directory exists on SSD
+  ansible.builtin.file:
+    path: "{{ journald_ssd_dir }}"
+    state: directory
+    owner: root
+    group: systemd-journal
+    mode: "2755"
+
+- name: Point /var/log/journal at the SSD journal directory
+  ansible.builtin.file:
+    path: /var/log/journal
+    src: "{{ journald_ssd_dir }}"
+    state: link
+    force: true
+    follow: false
+
+# --- 2. Kernel RFKill Default State ---------------------------------------
+- name: Configure kernel rfkill default state to unblocked (1)
+  ansible.builtin.lineinfile:
+    path: /etc/modprobe.d/rfkill_default.conf
+    regexp: '^options rfkill default_state='
+    line: "options rfkill default_state={{ rfkill_default_state }}"
+    create: true
+    mode: "0644"
+
+# --- 3. Regulatory Domain -------------------------------------------------
+- name: Ensure regulatory domain in kernel cmdline.txt
+  ansible.builtin.lineinfile:
+    path: /boot/firmware/cmdline.txt
+    regexp: '(^.*cfg80211\.ieee80211_regdom=)\S*(.*$)'
+    line: '\1{{ wifi_regdom }}\2'
+    backrefs: true
+
+- name: Set runtime wireless regulatory domain via iw
+  ansible.builtin.command:
+    cmd: "iw reg set {{ wifi_regdom }}"
+  changed_when: false
+
+# --- 4. Saved RFKill State Files ------------------------------------------
+- name: Find systemd rfkill wlan state files
+  ansible.builtin.find:
+    paths: /var/lib/systemd/rfkill
+    patterns: "*:wlan"
+  register: rfkill_wlan_files
+
+- name: Ensure rfkill wlan state is unblocked (0)
+  ansible.builtin.copy:
+    content: "0\n"
+    dest: "{{ item.path }}"
+    mode: "0644"
+  loop: "{{ rfkill_wlan_files.files }}"
+  when: rfkill_wlan_files.matched > 0
+
+# --- 5. NetworkManager State File -----------------------------------------
+- name: Ensure NetworkManager state file has wireless and networking enabled
+  community.general.ini_file:
+    path: /var/lib/NetworkManager/NetworkManager.state
+    section: main
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    mode: "0644"
+  loop:
+    - { option: "NetworkingEnabled", value: "true" }
+    - { option: "WirelessEnabled", value: "true" }
+
+# --- 6. NetworkManager Global Wi-Fi Powersave Override --------------------
+- name: Deploy NetworkManager global Wi-Fi power-save override
+  ansible.builtin.template:
+    src: default-wifi-powersave.conf.j2
+    dest: /etc/NetworkManager/conf.d/default-wifi-powersave.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- 7. Known Connection Profile Hardening --------------------------------
+- name: Configure autoconnect and priority on known connection profile
+  community.general.ini_file:
+    path: "{{ wifi_connection_file }}"
+    section: connection
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    mode: "0600"
+  loop:
+    - { option: "autoconnect", value: "true" }
+    - { option: "autoconnect-priority", value: "{{ autoconnect_priority | string }}" }
+    - { option: "autoconnect-retries", value: "{{ autoconnect_retries | string }}" }
+
+- name: Configure power saving disabled on known connection profile
+  community.general.ini_file:
+    path: "{{ wifi_connection_file }}"
+    section: wifi
+    option: powersave
+    value: "{{ nm_powersave | string }}"
+    no_extra_spaces: true
+    mode: "0600"
+
+- name: Reload NetworkManager connection profiles
+  ansible.builtin.command:
+    cmd: "nmcli connection reload"
+  changed_when: false

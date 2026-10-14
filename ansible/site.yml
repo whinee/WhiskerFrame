@@ -16,6 +16,9 @@
     # Storage & logging layer
     - role: journald_ssd
       tags: [journald]
+    # Wi-Fi cold boot persistence & radio unblock layer (Phase 2)
+    - role: wifi_persistence
+      tags: [wifi_persistence, wifi]
     # Memory safety layer (SSD swap backstop, swappiness, earlyoom)
     - role: memory_safety
       tags: [memory_safety]
