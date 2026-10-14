@@ -8,12 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi running on charger with UPS 3S module; 12.40V (94-95%), 0 throttled flags, 72.0°C temp (stabilized under 12MB/s rate limit).
-- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup streaming in progress (~18GB/60GB read, compressed to 2.3GB zstd; thermal throttle active) + Phase 5 Demo role authored and validated in check mode.
-- **Last RESULT:** Phase 3 Network Self-Healing & Hardware Watchdog verified live (DEC-W26, TSK-09, 36s recovery).
+- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 73.1°C temp (stabilized at 20MB/s rate limit).
+- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup streaming at ~37GB/60GB (~62% complete; 2.6GB compressed zstd image on SSD). Phase 5 role authored, committed, and ready for deployment.
+- **Last RESULT:** Phase 3 Network Self-Healing & Hardware Watchdog verified live (DEC-W26, TSK-09, 36s recovery); Phase 5 `guest_demo` role committed locally (`cd80a7c`) with DEC-W27 and TSK-10.
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Monitor completion of SD backup, compute SHA256 checksums, apply non-disruptive components of `guest_demo` role on deck, run containment abuse test suite.
+- **Next Action:** Await completion of raw block stream and SHA256 checksum calculation, verify backup integrity, apply non-disruptive components of `guest_demo` role on deck, run containment abuse test suite.
 
 ## 1. What this project is
 
@@ -752,6 +752,14 @@ STATUS: [2026-10-14T09:45Z] 20-Minute Handoff Checkpoint:
 2. Backup Progress (Phase 4): Partition table dumped to `mmcblk0-partition-table.sfdisk`, `/boot/firmware` archived to `boot-firmware.tar.gz` (68MB), raw SD card stream `sdcard-mmcblk0.img.zst` active at ~18GB/60GB read (~2.3GB compressed on SSD). Disaster recovery manual completed in `docs/dev/disaster-recovery.md`.
 3. Parallel Work (Phase 5): Drafted `ansible/roles/guest_demo` implementing REQ-OPS-04 (unprivileged `guest` user, ephemeral 8MB tmpfs home, 0700 privacy boundaries on `/home/neko` and `/root`, kernel-level `nftables` isolation dropping all guest egress, cgroup slice limits, 5s process reaper service, PAM logout cleanup, demo telemetry banner, containment test suite, and staged sshd deny per Rule 3). Validated in Ansible check mode (`ok=16 changed=13 failed=0`).
 4. Console Soak Test: `terminal.service` verified active on live deck (>1h20m continuous uptime without restarts or crashes). Codebase audited for CardKB debouncing and PTY signal propagation.
+
+STATUS: [2026-10-14T10:05Z] 20-Minute Handoff Checkpoint:
+1. Power & Thermals: Battery voltage holding at 12.41V (~95% SoC), float charge current (0.2mA-0.5mA), zero throttling (`throttled=0x0`). Streaming rate limit dynamically balanced at 20 MB/s, maintaining thermal equilibrium at 73.1°C (<74°C).
+2. Backup Progress (Phase 4): Block stream reached ~37GB/60GB (~62% complete). Unallocated sectors compressing efficiently with zstd, size holding at 2.6GB on SSD.
+3. Documentation Triad & Demo Assets (Phase 5): Authored `docs/dev/demo-day-checklist.md` with morning pre-flight checklist, step-by-step demonstration walkthrough, and post-demo password rotation reminder. Logged DEC-W27 in `docs/dev/ai-decisions.md`, registered TSK-10 in `docs/specifications/tasks.md`, and updated `docs/dev/changelog.md`. Committed locally (`cd80a7c`).
+4. Recovery Manual: Updated `docs/dev/ai-recovery/2026-10-14.md` with full Sections 4-7 covering remediations, residual risks, restore quick reference, and operator post-demo actions. Committed locally (`b06d7bf`).
+5. Soak Test Status: `terminal.service` running uninterrupted for >1h40m; earlyoom and system services healthy with 207MB free RAM and 832MB available swap.
+
 
 
 
