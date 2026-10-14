@@ -91,13 +91,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Cyberdeck goodbye splash artifacts")
     parser.parse_args()
 
-    print("Generating shutdown splash ('bai baiii')...")
-    prev_sh, bin_sh = generate_variant("bai baiii", "goodbye-shutdown")
+    print("Generating shutdown splash ('bai baiii!')...")
+    prev_sh, bin_sh = generate_variant("bai baiii!", "goodbye-shutdown")
     print(f"  Preview: {prev_sh}")
     print(f"  RGB565:  {bin_sh} ({bin_sh.stat().st_size} bytes)")
 
-    print("Generating reboot splash ('brb')...")
-    prev_rb, bin_rb = generate_variant("brb", "goodbye-reboot")
+    print("Generating reboot splash ('brb :3')...")
+    prev_rb, bin_rb = generate_variant("brb :3", "goodbye-reboot")
     print(f"  Preview: {prev_rb}")
     print(f"  RGB565:  {bin_rb} ({bin_rb.stat().st_size} bytes)")
 

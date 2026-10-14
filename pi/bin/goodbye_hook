@@ -25,6 +25,16 @@ sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "pi"))
 
+# Add venv site-packages if present (ensures whiskerframe and pyserial are found)
+_VENV_LIB = _REPO_ROOT / "pi/.venv/lib"
+if _VENV_LIB.is_dir():
+    for _site_packages in _VENV_LIB.glob("python3.*/site-packages"):
+        sys.path.insert(0, str(_site_packages))
+_OPT_VENV_LIB = Path("/opt/cyd-display-link/pi/.venv/lib")
+if _OPT_VENV_LIB.is_dir():
+    for _site_packages in _OPT_VENV_LIB.glob("python3.*/site-packages"):
+        sys.path.insert(0, str(_site_packages))
+
 try:
     from whiskerframe.models import DrawRect
     from whiskerframe.protocol import serialize
@@ -161,14 +171,29 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Resolve mode: default to shutdown unless reboot specified
+    # Resolve mode: default to shutdown unless reboot specified or detected
     mode = args.mode
     if mode == "auto":
-        # Check systemd target state if available
-        mode = "shutdown"
+        try:
+            import subprocess
+
+            proc = subprocess.run(
+                ["systemctl", "list-jobs"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            mode = "reboot" if "reboot.target" in proc.stdout else "shutdown"
+        except Exception:
+            mode = "shutdown"
 
     image_name = "goodbye-reboot.rgb565" if mode == "reboot" else "goodbye-shutdown.rgb565"
     rgb565_path = _REPO_ROOT / "assets/images" / image_name
+    if not rgb565_path.is_file():
+        alt_path = Path("/opt/cyd-display-link/assets/images") / image_name
+        if alt_path.is_file():
+            rgb565_path = alt_path
 
     port = args.port or resolve_serial_port()
 
