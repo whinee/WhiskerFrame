@@ -536,10 +536,34 @@ def _print_proc_error(
 
 def _execute_join_connect(
     ssid: str,
+    sec: str,
     password: str | None,
     hidden: bool,
 ) -> int:
-    """Run nmcli dev wifi connect and report outcome."""
+    """Run nmcli dev wifi connect or activate saved profile."""
+    is_open = sec in ("OPEN", "--", "NONE", "")
+
+    # 1. Check if a connection with this SSID or name is already saved
+    saved_proc = run_nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"])
+    saved_names = [
+        line.split(":")[0]
+        for line in saved_proc.stdout.splitlines()
+        if ":" in line and line.split(":")[1] in ("wifi", "802-11-wireless")
+    ]
+
+    if ssid in saved_names and not password:
+        print_bounded(f"Activating saved connection '{ssid}'...")
+        proc = run_nmcli(["connection", "up", "id", ssid])
+        if proc.returncode == 0:
+            print_bounded(f"Successfully connected to '{ssid}'.")
+            return 0
+
+    # 2. Prevent missing password submission against secured networks
+    if not is_open and not password and ssid not in saved_names:
+        print_bounded(f"Error: Network '{ssid}' is secured ({sec}). Password required.")
+        return 1
+
+    # 3. Attempt standard nmcli connect
     cmd = ["dev", "wifi", "connect", ssid]
     if password:
         cmd.extend(["password", password])
@@ -551,6 +575,36 @@ def _execute_join_connect(
     if proc.returncode == 0:
         print_bounded(f"Successfully connected to '{ssid}'.")
         return 0
+
+    # 4. Fallback if nmcli requires explicit key-mgmt profile creation
+    err_out = proc.stderr.strip() or proc.stdout.strip()
+    if "key-mgmt" in err_out and password:
+        key_mgmt = "sae" if "WPA3" in sec and "WPA2" not in sec else "wpa-psk"
+        print_bounded(f"Configuring explicit {key_mgmt} profile for '{ssid}'...")
+        add_cmd = [
+            "connection",
+            "add",
+            "type",
+            "wifi",
+            "con-name",
+            ssid,
+            "ifname",
+            "wlan0",
+            "ssid",
+            ssid,
+            "wifi-sec.key-mgmt",
+            key_mgmt,
+            "wifi-sec.psk",
+            password,
+        ]
+        add_proc = run_nmcli(add_cmd)
+        if add_proc.returncode == 0:
+            up_proc = run_nmcli(["connection", "up", "id", ssid])
+            if up_proc.returncode == 0:
+                print_bounded(f"Successfully connected to '{ssid}'.")
+                return 0
+            _print_proc_error(up_proc, f"Failed to activate '{ssid}'.")
+            return up_proc.returncode
 
     _print_proc_error(proc, f"Failed to connect to '{ssid}'.")
     return proc.returncode
@@ -571,7 +625,7 @@ def cmd_join(args: argparse.Namespace) -> int:
         return 1
 
     password = _prompt_password(ssid, sec, args.password)
-    return _execute_join_connect(ssid, password, args.hidden)
+    return _execute_join_connect(ssid, sec, password, args.hidden)
 
 
 def cmd_forget(args: argparse.Namespace) -> int:
