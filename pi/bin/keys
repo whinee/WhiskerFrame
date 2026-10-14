@@ -20,9 +20,10 @@ _CHEATSHEET: str = """
 
 STICKY CTRL LATCH:
   Fn+Tab        Arm Ctrl for NEXT key
+                NeoPixel LED turns YELLOW
                 Cursor turns YELLOW (#ffe08a)
                 Times out after 3.0s
-  Fn+Tab again  Toggle cancel (cursor resets)
+  Fn+Tab again  Toggle cancel (LED & cursor reset)
   Non-letter    Cancels latch and sends key
 
 COMMON CTRL CHORDS:
@@ -34,7 +35,8 @@ COMMON CTRL CHORDS:
   Fn+Tab [      Ctrl-[ (Escape)
 
 DISPLAY GEOMETRY CHORD:
-  Fn+Del        Cycle font / display geometry
+  Fn+Backspace  Cycle font / display geometry
+                (top-right key, labeled 'del')
                 Font 1: 53x30 (high density)
                 Font 2: 26x15 (default readable)
                 Font 3: 17x10 (large type)

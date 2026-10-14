@@ -263,12 +263,13 @@ class TerminalBridge:
     the daemon never auto-respawns a shell without a fresh authenticated login.
     """
 
-    def __init__(self, config: BridgeConfig) -> None:
+    def __init__(self, config: BridgeConfig, cardkb: Any | None = None) -> None:
         """
         Initialize the bridge from resolved configuration (opens no hardware).
 
         Args:
         - config (`BridgeConfig`): The resolved bridge configuration.
+        - cardkb (`Any | None`, optional): Optional CardKB reader instance for LED feedback.
 
         """
         self._config = config
@@ -278,6 +279,22 @@ class TerminalBridge:
         self._transport: SerialTransport | None = None
         self._serial_backoff = _SERIAL_BACKOFF_START_S
         self._prev: Grid | None = None
+        self._cardkb = cardkb
+
+    def set_ctrl_led(self, armed: bool) -> None:
+        """
+        Set CardKB NeoPixel to yellow when Ctrl is armed, clear when disarmed.
+
+        Args:
+        - armed (`bool`): ``True`` to illuminate yellow, ``False`` to turn off.
+
+        """
+        if self._cardkb is not None:
+            if armed:
+                # Yellow: 255 Red, 200 Green, 0 Blue (matches yellow cursor #ffe08a)
+                getattr(self._cardkb, "set_led", lambda *a: None)(255, 200, 0)
+            else:
+                getattr(self._cardkb, "clear_led", lambda: None)()
 
     @staticmethod
     def _valid_font_size(font_size: int) -> int:
@@ -738,6 +755,7 @@ class TerminalBridge:
         transport = self._ensure_serial()
         if transport is not None:
             show_splash(transport, self._config.splash_rgb565)
+            time.sleep(3.0)
 
 
 class _ShellSession:
@@ -795,6 +813,7 @@ class _ShellSession:
             return False
         if time.monotonic() - self._ctrl_armed_at > CTRL_LATCH_TIMEOUT_S:
             self._ctrl_armed = False
+            self._bridge.set_ctrl_led(False)
             return False
         return True
 
@@ -820,13 +839,17 @@ class _ShellSession:
         self._drain_startup()
         self._paint_session()
         running = True
-        while running:
-            running = self._read_pty()
-            was_armed = self._ctrl_armed
-            self._drain_keys()
-            if was_armed and not self._is_ctrl_armed():
-                self._paint_session()
-            self._maybe_keyframe()
+        try:
+            while running:
+                running = self._read_pty()
+                was_armed = self._ctrl_armed
+                self._drain_keys()
+                if was_armed and not self._is_ctrl_armed():
+                    self._paint_session()
+                self._maybe_keyframe()
+        finally:
+            self._ctrl_armed = False
+            self._bridge.set_ctrl_led(False)
 
     def _paint_session(self) -> None:
         """
@@ -935,6 +958,7 @@ class _ShellSession:
         if key in RESIZE_CHORDS:
             if self._ctrl_armed:
                 self._ctrl_armed = False
+                self._bridge.set_ctrl_led(False)
             self._grid = self._bridge._rebuild_geometry(self._master_fd)
             self._emulator = VTEmulator(self._grid, self._bridge._theme)
             self._paint_session()
@@ -943,9 +967,11 @@ class _ShellSession:
         if key in CTRL_LATCH_CHORDS:
             if self._is_ctrl_armed():
                 self._ctrl_armed = False
+                self._bridge.set_ctrl_led(False)
             else:
                 self._ctrl_armed = True
                 self._ctrl_armed_at = time.monotonic()
+                self._bridge.set_ctrl_led(True)
             self._paint_session()
             return True
 
@@ -963,6 +989,7 @@ class _ShellSession:
 
         """
         self._ctrl_armed = False
+        self._bridge.set_ctrl_led(False)
         self._paint_session()
         if key in _CTRL_VALID_CHARS:
             return bytes((key & 0x1F,))

@@ -21,8 +21,8 @@ Key features of the CardKB architecture:
 
 | Action | Chord / Key | Raw Byte (Hex) | Decimal | Behavior / Output |
 | :--- | :--- | :--- | :--- | :--- |
-| **Ctrl Latch** | `Fn + Tab` | `0x8C` | 140 | Arms sticky Ctrl for exactly one subsequent key. Cursor turns bright yellow (`#ffe08a`). Auto-cancels on 3.0s timeout or repeat `Fn + Tab`. |
-| **Cycle Geometry** | `Fn + Del` | `0x8B` | 139 | Cycles terminal font size and grid geometry: 53x30 -> 26x15 -> 17x10. |
+| **Ctrl Latch** | `Fn + Tab` | `0x8C` | 140 | Arms sticky Ctrl for exactly one subsequent key. CardKB NeoPixel illuminates yellow and cursor turns bright yellow (`#ffe08a`). Auto-cancels on 3.0s timeout or repeat `Fn + Tab`. |
+| **Cycle Geometry** | `Fn + Backspace` | `0x8B` | 139 | Cycles terminal font size and grid geometry: 53x30 -> 26x15 -> 17x10. (Key is top-right, labeled `del` on CardKB). |
 | **Arrow Up** | `Up` | `0xB5` | 181 | Emits VT100 sequence `\x1b[A` to PTY. |
 | **Arrow Down** | `Down` | `0xB6` | 182 | Emits VT100 sequence `\x1b[B` to PTY. |
 | **Arrow Left** | `Left` | `0xB4` | 180 | Emits VT100 sequence `\x1b[D` to PTY (or back to user select on login). |
@@ -40,6 +40,7 @@ Key features of the CardKB architecture:
 Because CardKB hardware cannot send simultaneous modifier state across keys, Whiskerframe provides a sequential sticky latch:
 
 1. **Arm Latch**: Press `Fn + Tab` (`0x8C`).
+   - The CardKB onboard NeoPixel LED illuminates bright yellow (I2C opcode `0x13 [255, 200, 0]`).
    - The cursor cell background immediately recolors from standard cyan (`#2dd8ff` / `0x2EDF`) to bright yellow (`#ffe08a` / `theme.ansi[11]` / `0xFF11`).
    - A 3.0-second timer begins.
 2. **Emit Ctrl Code**: Press the target character.
