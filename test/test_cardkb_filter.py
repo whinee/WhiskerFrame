@@ -36,8 +36,14 @@ def check_whitelist_drops() -> None:
     kf = KeyFilter()
     _assert(not kf.accept(0x00, now=0.0), "idle 0x00 must be dropped")
     _assert(not kf.accept(0xFF, now=0.0), "floating-bus 0xFF must be dropped")
-    _assert(not kf.accept(0xB0, now=0.0), "stray high byte 0xB0 (above Fn layer) must be dropped")
-    _assert(not kf.accept(0xB8, now=0.0), "stray high byte 0xB8 (above arrows) must be dropped")
+    _assert(
+        not kf.accept(0xB0, now=0.0),
+        "stray high byte 0xB0 (above Fn layer) must be dropped",
+    )
+    _assert(
+        not kf.accept(0xB8, now=0.0),
+        "stray high byte 0xB8 (above arrows) must be dropped",
+    )
 
 
 def check_whitelist_passes() -> None:

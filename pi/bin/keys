@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""
+Whiskerframe Cyberdeck CardKB Keyboard Helper.
+
+Formats and displays keyboard shortcut reference and sticky Ctrl cheat sheet
+guaranteed to fit within <= 53 columns (Font 1 geometry on CYD display).
+"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import sys
+import textwrap
+
+_MAX_COLS: int = 53
+
+_CHEATSHEET: str = """
+=== CARDKB CHEATSHEET (M5Stack I2C 0x5F) ===
+
+STICKY CTRL LATCH:
+  Fn+Tab        Arm Ctrl for NEXT key
+                Cursor turns YELLOW (#ffe08a)
+                Times out after 3.0s
+  Fn+Tab again  Toggle cancel (cursor resets)
+  Non-letter    Cancels latch and sends key
+
+COMMON CTRL CHORDS:
+  Fn+Tab c      Ctrl-C (interrupt process / SIGINT)
+  Fn+Tab d      Ctrl-D (EOF / exit shell session)
+  Fn+Tab z      Ctrl-Z (suspend job / SIGTSTP)
+  Fn+Tab l      Ctrl-L (clear terminal screen)
+  Fn+Tab u      Ctrl-U (clear current line)
+  Fn+Tab [      Ctrl-[ (Escape)
+
+DISPLAY GEOMETRY CHORD:
+  Fn+Del        Cycle font / display geometry
+                Font 1: 53x30 (high density)
+                Font 2: 26x15 (default readable)
+                Font 3: 17x10 (large type)
+
+NAVIGATION & SPECIAL:
+  Up / Down     History navigation / cursor
+  Left / Right  Line editing / cursor move
+  Del           Backspace (0x08)
+  Shift+Del     ASCII DEL (0x7F)
+  Tab           Shell auto-complete (0x09)
+  Esc           Cancel / Escape (0x1B)
+
+MODIFIER LAYERS:
+  Sym           Single ASCII punctuation
+  Aa / Shift    Uppercase letters
+  Fn            Extended functions / chords
+""".strip()
+
+
+def print_wrapped(text: str, max_cols: int = _MAX_COLS) -> None:
+    """Print text ensuring no line exceeds max_cols."""
+    for line in text.splitlines():
+        if len(line) <= max_cols:
+            print(line)
+        else:
+            print(textwrap.fill(line, width=max_cols, subsequent_indent="  "))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Display CardKB cheatsheet (<=53 columns).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--cols",
+        type=int,
+        default=_MAX_COLS,
+        help="Maximum output column width",
+    )
+    args = parser.parse_args()
+
+    width = min(args.cols, shutil.get_terminal_size((_MAX_COLS, 24)).columns)
+    if width <= 0:
+        width = _MAX_COLS
+
+    print_wrapped(_CHEATSHEET, max_cols=width)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
