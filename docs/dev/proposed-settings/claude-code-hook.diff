@@ -1,0 +1,17 @@
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -81,6 +81,15 @@
+     "PreToolUse": [
++      {
++        "matcher": "Write|Edit|NotebookEdit|Bash",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "/home/lyra/.config/agent-policy/bin/spec-interview-guard",
++            "timeout": 15
++          }
++        ]
++      },
+       {
+         "matcher": "*",
+         "hooks": [

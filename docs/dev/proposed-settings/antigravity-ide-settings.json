@@ -1,0 +1,10 @@
+{
+  "antigravity.agent.preToolUseHooks": [
+    {
+      "tools": ["Write", "Edit", "NotebookEdit", "Bash"],
+      "command": "/home/lyra/.config/agent-policy/bin/spec-interview-guard",
+      "timeout": 15000,
+      "failClosed": true
+    }
+  ]
+}

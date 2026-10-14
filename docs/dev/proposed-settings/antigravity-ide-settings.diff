@@ -1,0 +1,14 @@
+--- a/.vscode/settings.json
++++ b/.vscode/settings.json
+@@ -1,4 +1,12 @@
+ {
++  "antigravity.agent.preToolUseHooks": [
++    {
++      "tools": ["Write", "Edit", "NotebookEdit", "Bash"],
++      "command": "/home/lyra/.config/agent-policy/bin/spec-interview-guard",
++      "timeout": 15000,
++      "failClosed": true
++    }
++  ],
+   "editor.formatOnSave": true
+ }

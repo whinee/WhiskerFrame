@@ -1,0 +1,14 @@
+# Kiro Hook / Security Policy for Spec-Interview Guard
+# Can be placed in ~/.kiro/settings/hooks.yaml or .kiro/hooks/spec-guard.yaml
+version: "1.0"
+hooks:
+  pre_tool_use:
+    - name: spec-interview-guard
+      match_tools:
+        - write
+        - edit
+        - bash
+        - shell
+      command: "/home/lyra/.config/agent-policy/bin/spec-interview-guard"
+      timeout_seconds: 15
+      fail_action: block
