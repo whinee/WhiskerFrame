@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+"""
+Whiskerframe Cyberdeck Offline Wiki & Knowledge Base CLI (WS-5).
+
+Query Kiwix-serve offline Wikipedia / ZIM archives or fallback to
+local system documentation (man-db, bash help, python3 pydoc),
+strictly formatted for the 53-column CYD display (320x240 font size 1).
+
+Usage:
+    wiki <search-term>
+    wiki -r
+    wiki /path/to/article
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import os
+import re
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import textwrap
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Sequence
+from html.parser import HTMLParser
+
+# Handle broken pipes cleanly when piped to head/less
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+DEFAULT_COLS: int = 53
+DEFAULT_HOST: str = "127.0.0.1"
+DEFAULT_PORT: int = 8088
+DEFAULT_TIMEOUT: float = 2.0
+
+
+class SimpleHTMLTextExtractor(HTMLParser):
+    """Extract and format plain text from HTML content without external deps."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pieces: list[str] = []
+        self.skip_stack: int = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in ("script", "style", "noscript", "svg"):
+            self.skip_stack += 1
+        elif tag_lower in ("p", "div", "br", "tr", "h1", "h2", "h3", "h4", "h5", "h6"):
+            self.pieces.append("\n")
+        elif tag_lower == "li":
+            self.pieces.append("\n- ")
+        elif tag_lower == "hr":
+            self.pieces.append("\n---\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in ("script", "style", "noscript", "svg"):
+            if self.skip_stack > 0:
+                self.skip_stack -= 1
+        elif tag_lower in ("p", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6"):
+            self.pieces.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_stack == 0:
+            self.pieces.append(data)
+
+    def get_text(self) -> str:
+        raw = "".join(self.pieces)
+        decoded = html.unescape(raw)
+        # Collapse multiple blank lines
+        cleaned = re.sub(r"\n{3,}", "\n\n", decoded)
+        return cleaned.strip()
+
+
+def clean_terminal_escapes(text: str) -> str:
+    """Remove ANSI color codes and groff backspace overstrikes."""
+    # Groff bold/underline emits char + \x08 + char
+    cleaned = re.sub(r".\x08", "", text)
+    # ANSI escape sequences
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", cleaned)
+
+
+def _wrap_single_line(raw_line: str, cols: int) -> list[str]:
+    """Wrap one non-empty line to <= cols width with indent preservation."""
+    indent_len = len(raw_line) - len(raw_line.lstrip(" "))
+    subsequent_indent = " " * min(indent_len, 4)
+    wrapped = textwrap.wrap(
+        raw_line,
+        width=cols,
+        break_long_words=True,
+        break_on_hyphens=True,
+        subsequent_indent=subsequent_indent,
+    )
+    if not wrapped:
+        return [""]
+    out: list[str] = []
+    for chunk in wrapped:
+        while len(chunk) > cols:
+            out.append(chunk[:cols])
+            chunk = chunk[cols:]
+        out.append(chunk)
+    return out
+
+
+def format_to_cols(text: str, cols: int = DEFAULT_COLS) -> str:
+    """
+    Format and wrap text so every single line is <= cols width.
+
+    Guarantees no horizontal overflow on the 53-column CYD panel.
+    """
+    clean = clean_terminal_escapes(text)
+    out_lines: list[str] = []
+    for raw_line in clean.splitlines():
+        if not raw_line.strip():
+            out_lines.append("")
+        else:
+            out_lines.extend(_wrap_single_line(raw_line, cols))
+    return "\n".join(out_lines)
+
+
+def is_kiwix_online(
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> bool:
+    """Check if kiwix-serve is listening and reachable on the specified port."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def fetch_kiwix_w3m(url: str, cols: int = DEFAULT_COLS) -> str | None:
+    """Render a URL via w3m -dump -cols if w3m is installed."""
+    w3m_bin = shutil.which("w3m")
+    if not w3m_bin:
+        return None
+
+    try:
+        cmd = [w3m_bin, "-dump", "-cols", str(cols), url]
+        res = subprocess.run(  # noqa: S603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return format_to_cols(res.stdout, cols=cols)
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def fetch_kiwix_http(
+    url: str,
+    cols: int = DEFAULT_COLS,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> str:
+    """Fetch URL over HTTP and extract/format text cleanly."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return format_to_cols(f"[kiwix error] Invalid URL scheme: {url}", cols=cols)
+
+    req = urllib.request.Request(  # noqa: S310
+        url,
+        headers={"User-Agent": "Whiskerframe-Wiki/0.1 (CYD-53col)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            content_type = resp.headers.get("Content-Type", "")
+            raw_bytes = resp.read()
+            charset = resp.headers.get_content_charset() or "utf-8"
+            body = raw_bytes.decode(charset, errors="replace")
+
+            if "html" in content_type.lower() or "<html" in body[:200].lower():
+                parser = SimpleHTMLTextExtractor()
+                parser.feed(body)
+                extracted = parser.get_text()
+                return format_to_cols(extracted, cols=cols)
+            return format_to_cols(body, cols=cols)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        msg = f"[kiwix error] HTTP request failed:\n{exc}"
+        return format_to_cols(msg, cols=cols)
+
+
+def query_kiwix(
+    query_or_url: str,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    cols: int = DEFAULT_COLS,
+    is_random: bool = False,
+) -> str:
+    """Query kiwix-serve search API or render random/direct article."""
+    base_url = f"http://{host}:{port}"
+
+    if is_random:
+        target_url = f"{base_url}/random"
+    elif query_or_url.startswith(("http://", "https://")):
+        target_url = query_or_url
+    elif query_or_url.startswith("/"):
+        target_url = f"{base_url}{query_or_url}"
+    else:
+        # Standard search query across active ZIM catalog
+        quoted = urllib.parse.quote(query_or_url)
+        target_url = f"{base_url}/search?content=&pattern={quoted}"
+
+    # Priority 1: Render via w3m if installed (best HTML formatting)
+    w3m_out = fetch_kiwix_w3m(target_url, cols=cols)
+    if w3m_out:
+        return w3m_out
+
+    # Priority 2: Pure Python HTTP fetch + SimpleHTMLTextExtractor
+    return fetch_kiwix_http(target_url, cols=cols)
+
+
+def _try_man(term: str, cols: int) -> str | None:
+    """Attempt reading local man page."""
+    man_bin = shutil.which("man")
+    if not man_bin:
+        return None
+    env = os.environ.copy()
+    env["MANWIDTH"] = str(cols)
+    env["PAGER"] = "cat"
+    try:
+        res = subprocess.run(  # noqa: S603
+            [man_bin, "-P", "cat", term],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            header = (
+                f"[offline] kiwix inactive - showing man page:\n{'=' * min(cols, 40)}\n"
+            )
+            body = format_to_cols(res.stdout, cols=cols)
+            return header + body
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def _try_bash(term: str, cols: int) -> str | None:
+    """Attempt reading bash builtin help."""
+    bash_bin = shutil.which("bash")
+    if not bash_bin:
+        return None
+    try:
+        cmd = [bash_bin, "-c", f"help {shlex.quote(term)} 2>&1"]
+        res = subprocess.run(  # noqa: S603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        out_lower = res.stdout.lower()
+        if (
+            res.returncode == 0
+            and res.stdout.strip()
+            and "no help topics match" not in out_lower
+        ):
+            header = f"[offline] kiwix inactive - showing bash help:\n{'=' * min(cols, 40)}\n"
+            body = format_to_cols(res.stdout, cols=cols)
+            return header + body
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def _try_pydoc(term: str, cols: int) -> str | None:
+    """Attempt reading python documentation."""
+    py_bin = shutil.which("python3") or sys.executable
+    try:
+        code = f"import pydoc; pydoc.doc({term!r})"
+        res = subprocess.run(  # noqa: S603
+            [py_bin, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        out = res.stdout.strip() or res.stderr.strip()
+        out_lower = out.lower()
+        if (
+            res.returncode == 0
+            and out
+            and "no python documentation found" not in out_lower
+            and "use help()" not in out_lower
+        ):
+            header = f"[offline] kiwix inactive - showing python doc:\n{'=' * min(cols, 40)}\n"
+            body = format_to_cols(out, cols=cols)
+            return header + body
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def fallback_local_doc(
+    term: str,
+    cols: int = DEFAULT_COLS,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+) -> tuple[int, str]:
+    """
+    Search local system documentation when kiwix-serve is offline.
+
+    Priority order:
+    1. man <term> (via man-db formatted with MANWIDTH=cols)
+    2. bash help <term> (built-in shell commands)
+    3. python3 pydoc <term> (standard library and modules)
+
+    Returns:
+        (exit_code, formatted_text)
+
+    """
+    clean_term = term.strip()
+
+    man_out = _try_man(clean_term, cols)
+    if man_out:
+        return 0, man_out
+
+    bash_out = _try_bash(clean_term, cols)
+    if bash_out:
+        return 0, bash_out
+
+    py_out = _try_pydoc(clean_term, cols)
+    if py_out:
+        return 0, py_out
+
+    # All local sources exhausted
+    msg = (
+        f"[offline] kiwix-serve inactive ({host}:{port})\n"
+        f"No local documentation found for: '{clean_term}'\n\n"
+        f"Searched: man, bash help, python3 pydoc.\n"
+        f"To start kiwix offline library:\n"
+        f"  sudo systemctl start kiwix-serve"
+    )
+    return 1, format_to_cols(msg, cols=cols)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="wiki",
+        description="Whiskerframe Cyberdeck Offline Wiki Helper (53-col CYD).",
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, width=DEFAULT_COLS),
+    )
+    parser.add_argument(
+        "query",
+        nargs="*",
+        help="Search term or article path (e.g. 'Linux', '/A/Python').",
+    )
+    parser.add_argument(
+        "-r",
+        "--random",
+        action="store_true",
+        help="Fetch a random article from Kiwix.",
+    )
+    parser.add_argument(
+        "--cols",
+        type=int,
+        default=int(os.environ.get("WIKI_COLS", DEFAULT_COLS)),
+        help=f"Target column width (default: {DEFAULT_COLS}).",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("KIWIX_HOST", DEFAULT_HOST),
+        help=f"Kiwix server host (default: {DEFAULT_HOST}).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("KIWIX_PORT", DEFAULT_PORT)),
+        help=f"Kiwix server port (default: {DEFAULT_PORT}).",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entrypoint."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    cols = max(20, args.cols)
+    host = args.host
+    port = args.port
+
+    # 1. No arguments: print help
+    if not args.random and not args.query:
+        usage = (
+            "Whiskerframe Cyberdeck Wiki (53-col CYD)\n\n"
+            "Usage:\n"
+            "  wiki <search-term>   Search Wikipedia / man / docs\n"
+            "  wiki -r              Fetch random Wikipedia article\n"
+            "  wiki /path           Render specific Kiwix article\n\n"
+            "Examples:\n"
+            "  wiki Linux\n"
+            "  wiki nmap\n"
+            "  wiki -r\n"
+        )
+        print(format_to_cols(usage, cols=cols))
+        return 0
+
+    # 2. Check if kiwix-serve is online
+    online = is_kiwix_online(host=host, port=port)
+
+    if online:
+        if args.random:
+            rendered = query_kiwix("", host=host, port=port, cols=cols, is_random=True)
+            print(rendered)
+            return 0
+
+        term = " ".join(args.query)
+        rendered = query_kiwix(term, host=host, port=port, cols=cols, is_random=False)
+        print(rendered)
+        return 0
+
+    # 3. Kiwix is offline
+    if args.random:
+        msg = (
+            f"[offline] kiwix-serve is not running ({host}:{port}).\n"
+            f"Random article requires kiwix-serve.\n\n"
+            f"Local tool references are available via:\n"
+            f"  wiki <command>  (e.g. wiki nmap, wiki curl)\n\n"
+            f"To start kiwix service:\n"
+            f"  sudo systemctl start kiwix-serve"
+        )
+        print(format_to_cols(msg, cols=cols))
+        return 1
+
+    term = " ".join(args.query)
+    exit_code, output = fallback_local_doc(term, cols=cols, host=host, port=port)
+    print(output)
+    return exit_code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except OSError:
+            pass
+        sys.exit(0)
