@@ -811,3 +811,31 @@ Live demonstrations require handing the physical Cyberdeck to observers or untru
 **Tradeoffs / Risk:**
 - The guest user cannot access network utilities (`ping`, `curl`, `git clone`), which is an intentional containment boundary.
 - Any long-running batch calculation started by the guest is killed after 5 seconds by the process reaper.
+
+---
+
+## DEC-W28: Third-Party Artwork Licensing Policy, Non-Commercial Distribution Terms, & Derived Asset Isolation
+
+**Date:** 2026-10-15
+
+**Problem:**
+The repository contains third-party artistic assets in `assets/images/cess/`, including `Lyra and Dreanne Christmas Night Market.png` and doodle assets (`lyra-doodle-original.png`, `lyra-doodle-transparent.png`). Previously, contradiction C-01 marked these assets as an open-source blocker due to "No redistribution" notices. Furthermore, derived binary assets (such as `.rgb565` raw framebuffer conversions) were tracked in git, creating ambiguity regarding original vs. transformed creative works under open-source software licenses.
+
+**Root Cause:**
+Lack of explicit redistribution terms from the artist, and absence of a repository-level boundary separating software source code under MIT from non-commercial third-party artistic assets and local build outputs.
+
+**Decision:**
+- **Artist Permission Alignment (C-01 Resolution):** The operator relayed explicit permission from the artist, Cess, authorizing public release and unmodified redistribution of all artwork in `assets/images/cess/` with artist credit. Commercial use and modification/derivative redistribution remain strictly prohibited.
+- **Code License Exclusion:** Exclude `assets/images/cess/` from the repository MIT software license across root `LICENSE.md`, `README.md`, `docs/LICENSE.md`, and `docs/README.md`.
+- **Attribution & Documentation (`assets/images/cess/README.md`):** Maintain full artist attribution, document the explicit permission grant (dated 2026-10-15), state alignment with CC BY-NC-ND 4.0 concepts, and note that the README is a record of permission rather than a license grant authored by the operator.
+- **Cryptographic Integrity Gate (`SHA256SUMS`):** Generate and track `assets/images/cess/SHA256SUMS` for unmodified original art files. Require checksum verification before staging or committing any asset changes; prohibit in-place editing of originals.
+- **Derived Build Output Isolation:** Establish repository policy that only unmodified originals and conversion scripts reside in git. Device-ready conversions (e.g. `*.rgb565`, `*-derived.*`, `*-preview.*`, `*-composite.*`) are classified as local build artifacts and excluded via `.gitignore`. Untrack existing `.rgb565` binaries from the git index without rewriting historical commits.
+- **Commercial Kit Requirement (`REQ-LIC-02 [v1]`):** Require separate written permission or replacement art before selling or distributing the cyberdeck in commercial kits.
+
+**Physics & Feasibility Checks:**
+- *Storage Overhead:* Unmodified PNG originals (`~2.8MB` total) impose negligible disk overhead on git remotes and the 250GB SSD.
+- *Build Artifacts:* Local generation of RGB565 and composited splash images runs on demand without polluting repository history.
+
+**Tradeoffs / Risk:**
+- The repository is dual-licensed: MIT for code/docs, proprietary/non-commercial permissive for `assets/images/cess/`.
+- Commercial distribution of physical cyberdeck kits requires replacing the boot splash / goodbye art or securing a commercial license from the artist.

@@ -475,3 +475,10 @@ $RECYCLE.BIN/
 
 docs/dev/spec-interview/
 docs/dev/spec-interview-archives/
+
+# Derived art build outputs (unmodified originals and scripts stay in repo)
+assets/images/cess/*.rgb565
+assets/images/cess/*-derived.*
+assets/images/cess/*-preview.*
+assets/images/cess/*-composite.*
+
