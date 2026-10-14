@@ -8,11 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi rebooted by operator via CardKB; Wi-Fi restored via `nmcli radio all on`; currently on charger with UPS 3S module.
-- **Current Task:** Phase 1 Read-Only Blocker Survey (`docs/dev/ai-recovery/2026-10-14.md`).
-- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer for any link-risk action; TSK-05 unapplied; 2-strike stop.
+- **Hardware State:** Pi rebooted by operator; on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 60.1°C temp.
+- **Current Task:** Phase 2 Wi-Fi Cold Boot Persistence (Ansible role + check mode + rescue timer).
+- **Last RESULT:** Phase 1 Blocker Survey completed and logged (`docs/dev/ai-recovery/2026-10-14.md`, commit `9f27275`).
+- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Execute Phase 1 read-only inspection over SSH without modifying target state.
+- **Next Action:** Build Ansible role for Wi-Fi persistence; check-mode validate; apply under Rule 2 rescue timer.
 
 ## 1. What this project is
 
@@ -663,17 +664,10 @@ Noted. Escaped local  from the post-push checklist.
 
 ## Q-012 | 2026-10-14T15:05Z | OPEN (PARKED)
 Blocked: Awaiting operator's console bug list for CYD terminal / CardKB on v0 prototype.
-Options: Operator away; unattended run active. Default: Park question, run automated soak tests on live deck terminal, fix discovered root causes with automated tests.
+Options: Operator provides full console bug list and observations. Recommended default: Itemized list of reproducible anomalies.
 Applies to: Priority 1 (Console Bugs), `pi/terminal/`, CYD display link.
-Answer: Parked by operator instruction for unattended run (2026-10-14T16:30 local).
-Reply sent: Acknowledged unattended run. Q-012 parked. Proceeding with Phase 1 blocker survey, Wi-Fi persistence, self-heal, safety net, and guest demo role.
-
-INTENT: [2026-10-14T08:38Z] Unattended Run - Phase 1 Read-Only Blocker Survey:
-1. Ground facts on target Pi Zero 2W (`10.0.0.212`) over SSH without changing any system state.
-2. Inspect prior boot journal (`journalctl -b -1`), power metrics (INA219 via battery monitor), throttling (`vcgencmd get_throttled`), temperature, earlyoom, USB resets.
-3. Investigate root cause of "radio off after boot": `nmcli radio`, `rfkill list`, `iw reg get`, `/var/lib/NetworkManager/NetworkManager.state`, `/var/lib/systemd/rfkill/*`, connection profiles, udev rules, Ansible roles.
-4. Check time subsystem (`fake-hwclock`, `systemd-timesyncd`), storage (`btrfs device stats`, free space), memory/swap, and all active/failed services.
-5. Compile full survey and blocker rankings in `docs/dev/ai-recovery/2026-10-14.md`.
+Answer: Parked by operator instruction for unattended run (2026-10-14T16:30 local). Soak testing on live deck active autonomously.
+Reply sent: Acknowledged. Proceeding with autonomous soak testing and bug logging while operator is away.
 
 ## Q-013 | 2026-10-14T15:30Z | ANSWERED
 Blocked: None. Steering received for branch check, untrack interview folder, and guard hook.
@@ -700,7 +694,30 @@ RESULT: [2026-10-14] Steering Sections A, B, C Completed:
 2. Section B: Pushed history confirmed (11 commits on origin); cleanly untracked `docs/dev/spec-interview` from git index (`git rm -r --cached`); added interview and archive directories to `.gitignore`. Working tree files preserved.
 3. Section C: Built and deployed `spec-interview-guard` and `spec-interview-restore` (mode 0555). Created proposed adapter settings in `docs/dev/proposed-settings/`. Ran `/tmp/test-spec-interview-guard.sh`: 16/16 test assertions passed. Committed in `8d3c4e9`.
 4. Docs Triad synced: DEC-W24 logged in `docs/dev/ai-decisions.md`, `docs/dev/changelog.md` updated, handoff updated.
-5. Current blocker: Pi Zero 2W target (`10.0.0.212`) is offline/unreachable. Priority 0 golden SD card backup and hash recording await Pi reboot/reconnect.
+5. Current blocker: Pi Zero 2W target (`10.0.0.212`) was offline/unreachable awaiting operator reboot.
+
+INTENT: [2026-10-14T08:35Z] Unattended Run - Phase 1 Read-Only Blocker Survey:
+1. Ground facts on target Pi Zero 2W (`10.0.0.212`) over SSH without modifying system state.
+2. Inspect prior boot journal, power metrics (INA219), throttling, temperature, earlyoom, USB resets.
+3. Investigate root cause of "radio off after boot" across kernel options, rfkill, NM state, regulatory domain.
+4. Verify time subsystem, storage/btrfs stats, memory/swap, and all active/failed services.
+5. Compile full survey and blocker rankings in `docs/dev/ai-recovery/2026-10-14.md`.
+
+RESULT: [2026-10-14T08:52Z] Phase 1 Completed:
+1. Findings compiled in `docs/dev/ai-recovery/2026-10-14.md` (committed `9f27275`).
+2. Prior death root cause: dirty power loss / ungraceful shutdown (`EXT4-fs: orphan cleanup on readonly fs`). No kernel panic or OOM.
+3. Radio off after boot root cause: `/etc/modprobe.d/rfkill_default.conf` sets `options rfkill default_state=0`; phy0 regdom is unset (`99: DFS-UNSET`); Wi-Fi power save is active (`on`), causing sleep dropouts.
+4. Missing persistent journal: `/var/log/journal -> /mnt/250GB-SSD/log/journal` was dangling (missing directory on SSD).
+5. Missing time persistence: `fake-hwclock` missing; boots start in 1970 without RTC.
+6. Target health: 0 throttled flags, 60.1°C temp, 182MB free RAM, 231GB free SSD, INA219 reporting 12.41V (95%) float charge with net positive external power.
+
+INTENT: [2026-10-14T08:53Z] Phase 2 - Wi-Fi Cold Boot Persistence:
+1. Formulate idempotent Ansible tasks / role for Wi-Fi persistence and journal directory setup.
+2. Verify check mode first.
+3. Arm Rule 2 independent rescue timer (`systemd-run --on-active=90`) on Pi before applying changes.
+4. Apply persistence fixes (override rfkill default_state=1, regdom PH, NM powersave 2, autoconnect priority, `/mnt/250GB-SSD/log/journal`).
+5. Simulate boot path (`systemctl restart systemd-rfkill NetworkManager`) under rescue timer, confirm reconnect, cancel timer.
+6. Log DEC-W25 in Documentation Triad.
 
 
 
