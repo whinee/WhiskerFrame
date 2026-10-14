@@ -32,11 +32,12 @@ goodbye_hook = importlib.util.module_from_spec(_spec)
 sys.modules["goodbye_hook"] = goodbye_hook
 _loader.exec_module(goodbye_hook)
 
-from whiskerframe.models import DrawRect  # noqa: E402
+from whiskerframe.models import DrawRect, DrawText  # noqa: E402
 from whiskerframe.protocol import decode  # noqa: E402
 from whiskerframe.terminal import (  # noqa: E402
     DISPLAY_HEIGHT,
     DISPLAY_WIDTH,
+    DisplaySleep,
     DrawImage,
 )
 
@@ -76,7 +77,7 @@ class TestGoodbyeHook(unittest.TestCase):
         self.assertIsNone(goodbye_hook._read_image_blob(missing_path))
 
     def test_stream_image_chunks_coordinates(self) -> None:
-        """Image is centered at x=96, y=56 on 320x240 display."""
+        """Image is centered horizontally at x=96, y=36 on 320x240 display."""
         mock_ser = MagicMock()
         written_frames: list[bytes] = []
         mock_ser.write.side_effect = written_frames.append
@@ -87,6 +88,7 @@ class TestGoodbyeHook(unittest.TestCase):
             mock_ser,
             self.valid_bytes,
             start_time=time.monotonic(),
+            y_pos=36,
         )
         self.assertTrue(len(written_frames) > 0)
 
@@ -94,13 +96,13 @@ class TestGoodbyeHook(unittest.TestCase):
         first_cmd = decode(written_frames[0])
         self.assertIsInstance(first_cmd, DrawImage)
         self.assertEqual(first_cmd.x, (DISPLAY_WIDTH - 128) // 2)  # 96
-        self.assertEqual(first_cmd.y, (DISPLAY_HEIGHT - 128) // 2)  # 56
+        self.assertEqual(first_cmd.y, 36)
         self.assertEqual(first_cmd.w, 128)
         self.assertEqual(first_cmd.h, goodbye_hook._CHUNK_ROWS)
 
     @patch("time.sleep")
-    def test_full_send_goodbye_sequence(self, mock_sleep: MagicMock) -> None:
-        """Complete sequence transmits clear, image chunks, hold, and black wipe."""
+    def test_full_send_goodbye_shutdown_sequence(self, mock_sleep: MagicMock) -> None:
+        """Shutdown sequence transmits clear, image, 'bai baiii!', hold, black wipe, and sleep."""
         mock_ser = MagicMock()
         written_frames: list[bytes] = []
         mock_ser.write.side_effect = written_frames.append
@@ -109,6 +111,7 @@ class TestGoodbyeHook(unittest.TestCase):
             goodbye_hook.send_goodbye(
                 port="/dev/test_port",
                 rgb565_path=self.valid_blob_path,
+                mode="shutdown",
                 hold_s=1.0,
             )
 
@@ -120,10 +123,58 @@ class TestGoodbyeHook(unittest.TestCase):
         self.assertIsInstance(first_cmd, DrawRect)
         self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
 
-        # Check last frame (wipe to black)
+        # Check subtitle text frame
+        text_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, "bai baiii!")
+        self.assertEqual(text_frames[0].x, 160)
+        self.assertEqual(text_frames[0].y, 184)
+
+        # Check last frames (wipe to black + DisplaySleep)
+        second_last_cmd = decode(written_frames[-2])
+        self.assertIsInstance(second_last_cmd, DrawRect)
+        self.assertEqual(second_last_cmd.color, goodbye_hook._BLACK)
+
         last_cmd = decode(written_frames[-1])
-        self.assertIsInstance(last_cmd, DrawRect)
-        self.assertEqual(last_cmd.color, goodbye_hook._BLACK)
+        self.assertIsInstance(last_cmd, DisplaySleep)
+
+    @patch("time.sleep")
+    def test_full_send_goodbye_reboot_sequence(self, mock_sleep: MagicMock) -> None:
+        """Reboot sequence transmits clear, image, 'brb :3', hold, without black wipe or sleep."""
+        mock_ser = MagicMock()
+        written_frames: list[bytes] = []
+        mock_ser.write.side_effect = written_frames.append
+
+        with patch("serial.Serial", return_value=mock_ser):
+            goodbye_hook.send_goodbye(
+                port="/dev/test_port",
+                rgb565_path=self.valid_blob_path,
+                mode="reboot",
+                hold_s=1.0,
+            )
+
+        mock_sleep.assert_called_once()
+        mock_ser.close.assert_called_once()
+
+        # Check first frame (clear to theme bg)
+        first_cmd = decode(written_frames[0])
+        self.assertIsInstance(first_cmd, DrawRect)
+        self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
+
+        # Check subtitle text frame
+        text_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, "brb :3")
+        self.assertEqual(text_frames[0].x, 160)
+        self.assertEqual(text_frames[0].y, 184)
+
+        # Reboot does NOT send black wipe or sleep (keeps 'brb :3' on screen until reboot completes)
+        black_frames = [
+            cmd for f in written_frames if isinstance((cmd := decode(f)), DrawRect) and cmd.color == goodbye_hook._BLACK
+        ]
+        self.assertEqual(len(black_frames), 0)
+        sleep_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DisplaySleep)]
+        self.assertEqual(len(sleep_frames), 0)
 
     def test_fail_silent_on_missing_serial_port(self) -> None:
         """send_goodbye fails silent when serial port cannot be opened."""

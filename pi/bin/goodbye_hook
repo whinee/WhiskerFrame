@@ -36,11 +36,12 @@ if _OPT_VENV_LIB.is_dir():
         sys.path.insert(0, str(_site_packages))
 
 try:
-    from whiskerframe.models import DrawRect
+    from whiskerframe.models import DrawRect, DrawText
     from whiskerframe.protocol import serialize
     from whiskerframe.terminal import (
         DISPLAY_HEIGHT,
         DISPLAY_WIDTH,
+        DisplaySleep,
         DrawImage,
     )
 except ImportError:
@@ -52,10 +53,11 @@ _FALLBACK_PORT: str = "/dev/ttyUSB0"
 _BAUD: int = 115200
 
 _THEME_BG: int = 0x18C5  # blurple background (#191a28)
+_TEXT_COLOR: int = 0xFD9C  # theme pink (#ffb3e6)
 _BLACK: int = 0x0000
 _IMAGE_SIZE: int = 128
 _CHUNK_ROWS: int = 4
-_HOLD_DURATION_S: float = 4.0
+_HOLD_DURATION_S: float = 3.5
 _MAX_TOTAL_TIMEOUT_S: float = 7.5
 
 
@@ -80,10 +82,14 @@ def _read_image_blob(rgb565_path: Path) -> bytes | None:
     return blob if len(blob) == expected_bytes else None
 
 
-def _stream_image_chunks(ser: object, blob: bytes, start_time: float) -> None:
-    """Stream 128x128 image chunks centered on screen."""
+def _stream_image_chunks(
+    ser: object,
+    blob: bytes,
+    start_time: float,
+    y_pos: int = 36,
+) -> None:
+    """Stream 128x128 image chunks centered horizontally on screen."""
     x_pos = (DISPLAY_WIDTH - _IMAGE_SIZE) // 2
-    y_pos = (DISPLAY_HEIGHT - _IMAGE_SIZE) // 2
     row_bytes = _IMAGE_SIZE * 2
 
     for top in range(0, _IMAGE_SIZE, _CHUNK_ROWS):
@@ -103,25 +109,13 @@ def _stream_image_chunks(ser: object, blob: bytes, start_time: float) -> None:
     ser.flush()  # type: ignore[attr-defined]
 
 
-def _hold_and_wipe(ser: object, start_time: float, hold_s: float) -> None:
-    """Hold image for remaining duration and wipe to black."""
-    elapsed = time.monotonic() - start_time
-    remaining_hold = max(0.0, min(hold_s, _MAX_TOTAL_TIMEOUT_S - elapsed - 0.2))
-    if remaining_hold > 0:
-        time.sleep(remaining_hold)
-    black_frame = serialize(
-        DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_BLACK),
-    )
-    ser.write(black_frame)  # type: ignore[attr-defined]
-    ser.flush()  # type: ignore[attr-defined]
-
-
 def send_goodbye(
     port: str,
     rgb565_path: Path,
+    mode: str = "shutdown",
     hold_s: float = _HOLD_DURATION_S,
 ) -> None:
-    """Stream background clear, centered goodbye image, hold, and black wipe."""
+    """Stream background clear, centered doodle, subtitle, hold, and shutdown sleep."""
     blob = _read_image_blob(rgb565_path)
     if blob is None:
         return
@@ -134,13 +128,46 @@ def send_goodbye(
 
     start_time = time.monotonic()
     try:
+        # 1. Full-screen blurple background clear
         clear_frame = serialize(
-            DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_THEME_BG),
+            DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_THEME_BG, filled=True),
         )
         ser.write(clear_frame)
         ser.flush()
-        _stream_image_chunks(ser, blob, start_time)
-        _hold_and_wipe(ser, start_time, hold_s)
+
+        # 2. Stream centered doodle image chunks at y=36
+        _stream_image_chunks(ser, blob, start_time, y_pos=36)
+
+        # 3. Render crisp subtitle text below icon
+        subtitle = "brb :3" if mode == "reboot" else "bai baiii!"
+        text_cmd = serialize(
+            DrawText(
+                x=160,
+                y=184,
+                anchor="mm",
+                color=_TEXT_COLOR,
+                bg_color=_THEME_BG,
+                font_size=2,
+                text=subtitle,
+            )
+        )
+        ser.write(text_cmd)
+        ser.flush()
+
+        # 4. Hold display for operator-specified duration
+        elapsed = time.monotonic() - start_time
+        remaining_hold = max(0.0, min(hold_s, _MAX_TOTAL_TIMEOUT_S - elapsed - 0.2))
+        if remaining_hold > 0:
+            time.sleep(remaining_hold)
+
+        # 5. On shutdown: wipe black and issue DisplaySleep opcode
+        if mode == "shutdown":
+            black_frame = serialize(
+                DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_BLACK, filled=True),
+            )
+            ser.write(black_frame)
+            ser.write(serialize(DisplaySleep()))
+            ser.flush()
     except Exception:  # noqa: BLE001, S110
         pass
     finally:
@@ -199,7 +226,7 @@ def main() -> int:
 
     # Fail silent on execution
     try:
-        send_goodbye(port, rgb565_path, hold_s=args.hold)
+        send_goodbye(port, rgb565_path, mode=mode, hold_s=args.hold)
     except Exception:  # noqa: BLE001, S110
         pass
 
