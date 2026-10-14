@@ -117,6 +117,7 @@ def render_login(
     cols: int,
     rows: int,
     error: str = "",
+    demo_mode: bool = False,
 ) -> Grid:
     """
     Render a login state onto a fresh grid ready for diffing.
@@ -166,4 +167,8 @@ def render_login(
         if error:
             red = theme.ansi[1] if len(theme.ansi) > 1 else theme.fg
             _put_text(grid, next_row + 1, 0, error, red, theme.bg)
+    if demo_mode and rows > 4:
+        hint_text = "demo: guest / guest" if cols >= 19 else "guest / guest"
+        hint_col = theme.ansi[8] if len(theme.ansi) > 8 else theme.fg
+        _put_text(grid, rows - 1, 0, hint_text[:cols], hint_col, theme.bg)
     return grid

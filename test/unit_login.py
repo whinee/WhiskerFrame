@@ -33,6 +33,8 @@ from terminal.login import (
     SubmitEvent,
     authenticate,
 )
+from terminal.login_view import render_login
+from terminal.theme import load_theme
 
 _UP: int = 0xB5
 _DOWN: int = 0xB6
@@ -209,6 +211,27 @@ def check_authenticate_guard() -> None:
     raise AssertionError(msg)
 
 
+def check_demo_mode_hint() -> None:
+    """Assert demo_mode renders a login hint at the bottom of the screen."""
+    state = LoginState(users=["root", "neko", "guest"])
+    theme = load_theme(None)
+    # With demo_mode=True
+    grid_demo = render_login(state, theme, cols=26, rows=15, demo_mode=True)
+    bottom_line = "".join(grid_demo.cell_at(14, col).char for col in range(26)).rstrip()
+    assert (
+        "guest / guest" in bottom_line
+    ), f"expected hint on bottom line, got {bottom_line!r}"
+
+    # With demo_mode=False
+    grid_nodemo = render_login(state, theme, cols=26, rows=15, demo_mode=False)
+    bottom_line_no = "".join(
+        grid_nodemo.cell_at(14, col).char for col in range(26)
+    ).rstrip()
+    assert (
+        "guest / guest" not in bottom_line_no
+    ), "hint should not appear when demo_mode=False"
+
+
 def main() -> None:
     """
     Run the login checks and report the outcome.
@@ -225,6 +248,7 @@ def main() -> None:
         check_clear_password()
         check_empty_users_rejected()
         check_authenticate_guard()
+        check_demo_mode_hint()
     except AssertionError as exc:
         print(f"FAIL: {exc}")
         sys.exit(1)
