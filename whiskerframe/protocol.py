@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from whiskerframe.anchors import Anchor, resolve_anchor
 from whiskerframe.models import DrawRect, DrawText
-from whiskerframe.terminal import DrawCells, DrawImage, Scroll
+from whiskerframe.terminal import DisplaySleep, DrawCells, DrawImage, Scroll
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,6 +46,7 @@ __all__ = [
     "OPCODE_DRAW_TEXT",
     "OPCODE_FLUSH",
     "OPCODE_SCROLL",
+    "OPCODE_SLEEP",
     "SOF",
     "crc8",
     "decode",
@@ -70,6 +71,9 @@ OPCODE_SCROLL: int = 0x04
 
 OPCODE_DRAW_IMAGE: int = 0x05
 """Opcode selecting the ``DRAW_IMAGE`` command (a raw RGB565 pixel block)."""
+
+OPCODE_SLEEP: int = 0x06
+"""Opcode selecting the ``SLEEP`` command (display off, backlight low, 80MHz CPU)."""
 
 OPCODE_CLEAR: int = 0x10
 """Reserved opcode clearing the display to a fill color (not yet serialized)."""
@@ -329,18 +333,24 @@ def _encode_draw_image(command: DrawImage) -> bytes:
     return header + command.data
 
 
+def _encode_display_sleep(_command: DisplaySleep) -> bytes:
+    """Encode a ``DisplaySleep`` command into its 0-byte payload."""
+    return b""
+
+
 _ENCODERS: tuple[tuple[type, int, Callable[[Any], bytes]], ...] = (
     (DrawText, OPCODE_DRAW_TEXT, _encode_draw_text),
     (DrawRect, OPCODE_DRAW_RECT, _encode_draw_rect),
     (DrawCells, OPCODE_DRAW_CELLS, _encode_draw_cells),
     (Scroll, OPCODE_SCROLL, _encode_scroll),
     (DrawImage, OPCODE_DRAW_IMAGE, _encode_draw_image),
+    (DisplaySleep, OPCODE_SLEEP, _encode_display_sleep),
 )
 """Command type -> (opcode, payload encoder) dispatch for :func:`serialize`."""
 
 
 def serialize(
-    command: DrawText | DrawRect | DrawCells | Scroll | DrawImage,
+    command: DrawText | DrawRect | DrawCells | Scroll | DrawImage | DisplaySleep,
 ) -> bytes:
     """
     Serialize a resolved drawing command into complete framed bytes.
@@ -583,18 +593,24 @@ def _unframe(frame_bytes: bytes) -> bytes:
     return body
 
 
-_Command = DrawText | DrawRect | DrawCells | Scroll | DrawImage
+def _decode_display_sleep(_payload: bytes) -> DisplaySleep:
+    """Decode a ``SLEEP`` payload into a ``DisplaySleep`` command."""
+    return DisplaySleep()
+
+
+_Command = DrawText | DrawRect | DrawCells | Scroll | DrawImage | DisplaySleep
 _DECODERS: dict[int, Callable[[bytes], _Command]] = {
     OPCODE_DRAW_TEXT: _decode_draw_text,
     OPCODE_DRAW_RECT: _decode_draw_rect,
     OPCODE_DRAW_CELLS: _decode_draw_cells,
     OPCODE_SCROLL: _decode_scroll,
     OPCODE_DRAW_IMAGE: _decode_draw_image,
+    OPCODE_SLEEP: _decode_display_sleep,
 }
 """Opcode -> payload decoder dispatch table (keeps :func:`decode` flat)."""
 
 
-def decode(frame_bytes: bytes) -> DrawText | DrawRect | DrawCells | Scroll | DrawImage:
+def decode(frame_bytes: bytes) -> _Command:
     """
     Decode a complete framed byte sequence back into a drawing command.
 

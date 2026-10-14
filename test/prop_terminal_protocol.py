@@ -25,7 +25,14 @@ from hypothesis import strategies as st
 
 from whiskerframe.models import UINT8_MAX, UINT16_MAX
 from whiskerframe.protocol import decode, serialize
-from whiskerframe.terminal import INT8_MAX, INT8_MIN, DrawCells, DrawImage, Scroll
+from whiskerframe.terminal import (
+    INT8_MAX,
+    INT8_MIN,
+    DisplaySleep,
+    DrawCells,
+    DrawImage,
+    Scroll,
+)
 
 MAX_EXAMPLES: int = 300
 """Number of generated examples per property check."""
@@ -103,12 +110,12 @@ def _draw_image(draw: st.DrawFn) -> DrawImage:
     return DrawImage(x=draw(_uint16), y=draw(_uint16), w=w, h=h, data=data)
 
 
-_commands = st.one_of(_draw_cells(), _scroll(), _draw_image())
+_commands = st.one_of(_draw_cells(), _scroll(), _draw_image(), st.just(DisplaySleep()))
 
 
 @given(command=_commands)
 @settings(max_examples=MAX_EXAMPLES)
-def check_round_trip(command: DrawCells | Scroll | DrawImage) -> None:
+def check_round_trip(command: DrawCells | Scroll | DrawImage | DisplaySleep) -> None:
     """
     Assert that decoding the serialized frame reproduces the command.
 
