@@ -81,8 +81,11 @@ terminal:
   # returns to this screen.
   login:
     enabled: true
+    demo_mode: true        # show "guest / guest" hint on login screen
     users:                 # selectable at the login screen; auth is real system auth
-      - CHANGEME           # e.g. a non-root system username; add one per selectable user
+      - root
+      - neko
+      - guest
     password_mask: "*"
   # Boot splash image shown while the Pi comes up (before the login screen).
   splash:

@@ -170,6 +170,9 @@ def load_bridge_config() -> BridgeConfig:
     terminal: dict[str, Any] = config.get("terminal", {}) or {}
     cardkb: dict[str, Any] = config.get("cardkb", {}) or {}
     users, mask = _resolve_users(terminal)
+    login = terminal.get("login", {}) or {}
+    login = login if isinstance(login, dict) else {}
+    demo_mode = bool(login.get("demo_mode", "guest" in users))
     resolved = BridgeConfig(
         serial_port=str(terminal.get("serial_port", "/dev/ttyUSB0")),
         baud=_as_int(terminal.get("baud"), 115200),
@@ -182,6 +185,7 @@ def load_bridge_config() -> BridgeConfig:
         password_mask=mask,
         splash_rgb565=_resolve_splash_path(terminal),
         theme=load_theme(config),
+        demo_mode=demo_mode,
     )
     tracepoint(
         "terminal.config",
