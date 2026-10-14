@@ -17,6 +17,14 @@ This software uses [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- Hardware NeoPixel Feedback, Short Shell Prompts, Split Systemd Goodbye Units, and NetworkManager Join Hardening (DEC-W30, 2026-10-15):
+  - **CardKB NeoPixel Hardware Feedback:** Implemented I2C `set_led(r, g, b)` (opcode `0x13`) and `clear_led()` (opcode `0x11`) in `pi/cardkb/reader.py`. Wired `bridge.py` to illuminate the CardKB NeoPixel bright yellow (`255, 200, 0`) when `Ctrl` is latched, clearing on unarm or timeout.
+  - **Short Shell Prompts:** Deployed `/etc/profile.d/cyd_prompt.sh` defining compact prompts: `n~ ` (neko), `g~ ` (guest), and `r# ` (root). Sourced in `/etc/bash.bashrc`, `/home/neko/.bashrc`, `/etc/skel/.bashrc`, and `/root/.bashrc` to prevent long prompt line wrap on 53/26 column displays.
+  - **Split Systemd Goodbye Units:** Registered dedicated units `cyberdeck-goodbye-reboot.service` (`WantedBy=reboot.target`, `--mode reboot` with `"brb :3"`) and `cyberdeck-goodbye-shutdown.service` (`WantedBy=poweroff.target halt.target`, `--mode shutdown` with `"bai baiii!"`) executing via venv Python. Added 3.0s hold in `TerminalBridge._show_splash()` so boot splash is visible.
+  - **NetworkManager Join Hardening:** Enhanced `pi/bin/wifi` to activate existing saved connection profiles, require passwords on secured networks, and retry with explicit `wifi-sec.key-mgmt wpa-psk` if NetworkManager throws missing property errors.
+  - **Cheatsheet Clarification:** Clarified geometry cycling chord as `Fn + Backspace (labeled 'del')` in `pi/bin/keys` and `docs/dev/keyboard-cheatsheet.md`.
+  - Details in `docs/dev/ai-decisions.md` (DEC-W30).
+
 - Demo Polish & Ergonomics Suite (DEC-W29, TSK-11..15, 2026-10-15): Readying v0 prototype for public interaction at DICT HACK4GOV 5.
   - **Guest Demo UX & Persistence (TSK-11):** Configured `demo_mode: true` in `/etc/whiskerframe.yaml` and `.whiskerframe.example.yaml`, adding selectable `guest` user and rendering `"demo: guest / guest"` credentials hint on the bottom row of `pi/terminal/login_view.py`. Resolved nftables guest isolation cold boot failure by adding drop-in inclusion `include "/etc/nftables.d/*.nft"` to `/etc/nftables.conf` and enabling `nftables.service`. Verified 11/11 tests pass in `/usr/local/bin/test-guest-containment.sh` and proved real PTY su login.
   - **CardKB Sticky Ctrl Latch & Cheatsheet (TSK-12):** Implemented sequential sticky Ctrl state machine in `pi/terminal/bridge.py` triggered by `Fn+Tab` (`0x8C`) with 3.0s timeout, toggle cancellation, cursor recoloring (`theme.ansi[11]` bright yellow `#ffe08a`), and standard C0 bitmasking (`char & 0x1F`). Deployed `pi/bin/keys` CLI and authored `docs/dev/keyboard-cheatsheet.md`.
