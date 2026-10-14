@@ -232,8 +232,8 @@ def run(config: BridgeConfig) -> int:
     `int`: Process exit code (``0`` on a clean return).
 
     """
-    bridge = TerminalBridge(config)
     keypad = CardKB(bus=config.cardkb_bus, address=config.cardkb_address)
+    bridge = TerminalBridge(config, cardkb=keypad)
     log(
         "INFO",
         f"terminal bridge started (serial {config.serial_port}, "

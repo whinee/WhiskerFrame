@@ -223,6 +223,48 @@ class CardKB:
             raise CardKBError(f"read failed: {err}") from err
         return data[0] if data else NO_KEY
 
+    def set_led(self, r: int, g: int, b: int) -> bool:
+        r"""
+        Set the CardKB onboard SK6812 NeoPixel RGB color.
+
+        CardKB firmware (receiveEvent) supports opcode ``0x13`` with 3 RGB byte
+        parameters: ``bytes([0x13, r, g, b])``. Fails silent on bus error.
+
+        Args:
+        - r (`int`): Red intensity (``0..255``).
+        - g (`int`): Green intensity (``0..255``).
+        - b (`int`): Blue intensity (``0..255``).
+
+        Returns:
+        `bool`: ``True`` if transmitted successfully, ``False`` on bus error.
+
+        """
+        if self._fd is None:
+            return False
+        try:
+            os.write(self._fd, bytes([0x13, r & 0xFF, g & 0xFF, b & 0xFF]))
+            return True
+        except OSError:
+            return False
+
+    def clear_led(self) -> bool:
+        r"""
+        Turn off the CardKB onboard SK6812 NeoPixel.
+
+        CardKB firmware supports opcode ``0x11`` to clear the pixel.
+
+        Returns:
+        `bool`: ``True`` if transmitted successfully, ``False`` on bus error.
+
+        """
+        if self._fd is None:
+            return False
+        try:
+            os.write(self._fd, bytes([0x11]))
+            return True
+        except OSError:
+            return False
+
     def keys(self, poll_interval_s: float = 0.05) -> Iterator[int]:
         r"""
         Yield key bytes as they are pressed, polling at a fixed cadence.
