@@ -741,4 +741,37 @@ Following an unattended cold boot or power-cycle, the Cyberdeck's wireless radio
 
 ---
 
+## DEC-W26: Network Self-Healing Escalation, BCM2835 Hardware Watchdog, & Fake-HWClock Monotonicity
+
+**Date:** 2026-10-14
+
+**Problem:**
+Even with persisted Wi-Fi configuration, wireless links on embedded Broadcom FullMAC hardware (`brcmfmac`) can stall due to AP reboots, RF interference, or kernel driver lockups. Without an active operator or physical console access:
+1. Link loss leaves the headless deck unreachable indefinitely.
+2. The lack of a hardware Real-Time Clock (RTC) causes cold boots to start at epoch 1970, breaking TLS certificates, systemd timer schedules, and cryptographic handshakes until NTP syncs.
+3. Total system lockups cannot be recovered without a hardware watchdog reset.
+4. Auto-rebooting on network loss risks boot-loop thrashing if an external Wi-Fi access point is down.
+
+**Decision:**
+- **Zero-Auto-Reboot Escalation Architecture:** Deploy `/usr/local/bin/cyberdeck-net-heal.sh` driven by `cyberdeck-net-heal.timer` on a ~30-second cadence. When gateway ICMP ping fails 3 consecutive times:
+  - *Tier 1 (Immediate / <5m failure):* Execute `rfkill unblock wifi`, `nmcli radio wifi on`, and `nmcli device connect wlan0 || nmcli connection up preconfigured`.
+  - *Tier 2 (Continuous failure >5m / 300s):* Execute `systemctl restart NetworkManager`.
+  - *Tier 3 (Continuous failure >15m / 900s):* Bring link down, reload FullMAC kernel modules (`modprobe -r brcmfmac_wcc brcmfmac; modprobe brcmfmac`), and restart NetworkManager.
+  - *Hard Constraint:* Under NO circumstances does the script issue a system reboot or poweroff.
+- **Hardware Watchdog Lockdown:** Configure `/etc/systemd/system.conf.d/00-watchdog.conf` with `RuntimeWatchdogSec=60s` and `RebootWatchdogSec=2min` to continuously pet the BCM2835 SoC hardware watchdog (`/dev/watchdog0`). If systemd itself completely panics or deadlocks, the hardware watchdog automatically resets the board.
+- **Clock Monotonicity via `fake-hwclock`:** Install `fake-hwclock`, enabling `fake-hwclock-load.service` at boot and `fake-hwclock-save.timer` (hourly) plus shutdown unit to preserve the monotonically advancing timestamp in `/etc/fake-hwclock.data`, preventing 1970 regressions.
+- **Dual Heartbeat Logging:** Write structured telemetry every tick to `/run/cyberdeck/heartbeat.json` (transient in-memory) and `/var/lib/whiskerframe/last-known-heartbeat.json` (persistent on disk), recording timestamp, epoch, IP, gateway, SSID, ping status, fail count, and escalation tier.
+- **Live Empirical Proof:** Verified under Rule 2 rescue timer (`systemd-run --unit=wifi-rescue-proof --on-active=120`) by running `rfkill block wifi` on the deck. The self-healing daemon detected failure, escalated to Tier 1, unblocked the radio, re-associated, and restored gateway ping within exactly 36 seconds.
+
+**Physics & Feasibility Checks:**
+- *Watchdog Timeout Calculation:* BCM2835 hardware watchdog hardware limit is 60 seconds. A systemd keepalive period of 30 seconds ensures a 2x safety factor against false triggers under high load.
+- *CPU & Network Overhead:* ICMP ping (3 packets of 56 bytes every 30s) consumes negligible bandwidth (<0.05 KB/s) and <0.1% CPU on the BCM2837B0.
+
+**Tradeoffs / Risk:**
+- Tier 3 module reload momentarily resets USB/SDIO bus states for the wireless interface.
+- If the target AP is permanently offline, Tier 1 and Tier 2 escalations loop periodically without rebooting, as designed.
+
+---
+
+
 

@@ -1,0 +1,10 @@
+[Unit]
+Description=Whiskerframe Cyberdeck Network Self-Healing Timer (~{{ net_heal_check_interval_sec }}s)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ net_heal_check_interval_sec }}s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

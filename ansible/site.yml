@@ -19,6 +19,9 @@
     # Wi-Fi cold boot persistence & radio unblock layer (Phase 2)
     - role: wifi_persistence
       tags: [wifi_persistence, wifi]
+    # Network self-healing & hardware watchdog layer (Phase 3)
+    - role: self_heal_watchdog
+      tags: [self_heal_watchdog, self_heal, watchdog]
     # Memory safety layer (SSD swap backstop, swappiness, earlyoom)
     - role: memory_safety
       tags: [memory_safety]

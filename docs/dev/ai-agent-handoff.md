@@ -8,12 +8,12 @@ exact live hardware state, and the conventions you MUST follow.
 
 - **Session Context:** Unattended 3-4h autonomous run (operator away; hard cap 4.5h ~2026-10-14T13:05Z; Pi freeze 2026-10-14T11:35Z).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth verified).
-- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 59.6°C temp.
-- **Current Task:** Phase 3 Network Self-Healing & Hardware Watchdog (`fake-hwclock`, escalation script, watchdog timer, heartbeat).
-- **Last RESULT:** Phase 2 Wi-Fi Cold Boot Persistence applied, validated live under Rule 2 rescue timer, simulated boot path reconnected in 1s (DEC-W25, TSK-08).
+- **Hardware State:** Pi running on charger with UPS 3S module; 12.41V (95%), 0 throttled flags, 59.1°C temp.
+- **Current Task:** Phase 4 Local SD-to-SSD Safety Net Backup (`dd | zstd -T1`, boot/firmware tarball, partition table, restore procedure).
+- **Last RESULT:** Phase 3 Network Self-Healing & Hardware Watchdog verified live (DEC-W26, TSK-09, 36s recovery).
 - **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer (`systemd-run --on-active=90`) for link-risk actions; TSK-05 unapplied.
 - **Open Blockers:** Q-012 (console bugs parked for operator return; soak testing active).
-- **Next Action:** Build self-healing script, timer, fake-hwclock install, watchdog config, test self-healing under Rule 2.
+- **Next Action:** Verify power margins, create /mnt/250GB-SSD/backup/, run ionice/nice dd | zstd -T1 backup, record SHA-256 and restore SOP.
 
 ## 1. What this project is
 
@@ -738,6 +738,25 @@ INTENT: [2026-10-14T09:12Z] Phase 3 - Network Self-Healing & Hardware Watchdog:
 3. Configure hardware watchdog (`RuntimeWatchdogSec=15s` in `/etc/systemd/system.conf`) if supported by BCM2835 watchdog driver and confirmed safe against boot loops.
 4. Deploy lightweight heartbeat file logging last-known IP, interface state, and timestamp (`/run/cyberdeck-heartbeat.json`).
 5. Prove self-healing on live deck under Rule 2: simulate failure via `rfkill block wifi` and measure time-to-recovery.
+
+RESULT: [2026-10-14T09:23Z] Phase 3 Completed:
+1. Role `self_heal_watchdog` implemented and check-mode validated (`ansible/roles/self_heal_watchdog/`).
+2. Installed `fake-hwclock` package; enabled `fake-hwclock-save.timer` (hourly) and `fake-hwclock-load.service` (sysinit); initialized `/etc/fake-hwclock.data`.
+3. Locked in systemd hardware watchdog supervision via `/etc/systemd/system.conf.d/00-watchdog.conf` (`RuntimeWatchdogSec=60s`, `RebootWatchdogSec=2min`) supervising `/dev/watchdog0` (BCM2835 watchdog).
+4. Deployed `/usr/local/bin/cyberdeck-net-heal.sh` and enabled `cyberdeck-net-heal.timer` (~30s cadence). Dual heartbeat written to `/run/cyberdeck/heartbeat.json` and persistent `/var/lib/whiskerframe/last-known-heartbeat.json`.
+5. Proven live on hardware under Rule 2 rescue timer (`wifi-rescue-proof`): `rfkill block wifi` executed; self-heal detected failure and restored gateway ping within exactly 36 seconds; rescue timer cancelled cleanly.
+6. Documentation Triad synced: DEC-W26 logged, `tasks.md` updated with TSK-09, `changelog.md` updated.
+
+INTENT: [2026-10-14T09:25Z] Phase 4 - Local SD-to-SSD Safety Net Backup:
+1. Validate power margins: verify battery voltage >40% (>11.5V on 3S), positive or float charge current, zero throttling (`vcgencmd get_throttled`), temp <75°C.
+2. Audit target storage on external SSD: verify `/mnt/250GB-SSD` has sufficient space (>20GB free for compressed 32GB SD image).
+3. Create dedicated backup directory `/mnt/250GB-SSD/backup/`.
+4. Capture partition table structure (`sfdisk -d /dev/mmcblk0`) and tarball `/boot/firmware`.
+5. Execute throttled, low-priority local streaming image:
+   `nice -n 19 ionice -c 3 dd if=/dev/mmcblk0 bs=4M conv=sync,noerror status=progress | zstd -T1 -3 > /mnt/250GB-SSD/backup/sd-card-crash-consistent.img.zst`.
+6. Continuously monitor power, temperature, and swap during the backup job.
+7. Generate SHA-256 checksums and author comprehensive disaster recovery and restore SOP in `docs/dev/disaster-recovery.md`.
+
 
 
 
