@@ -669,3 +669,32 @@ Noted. Escaped local  from the post-push checklist.
 **4. Documentation Triad Synced:**
 - Logged `DEC-W19` (UI customization, font glyph subsetting, deferred LED matrix), `DEC-W20` (storage lifecycle, encrypted sharing, Backrest snapshots), `DEC-W21` (power profiles, telemetry discharge logging), `DEC-W22` (mechanical envelope, acrylic fabrication, drop protection), and `DEC-W23` (tiered bus architecture, Qwiic/USB standardization, edge card deferral) in `docs/dev/ai-decisions.md`.
 - Updated `docs/dev/changelog.md` and `docs/specifications/product-requirements.md`.
+
+## Q-012 | 2026-10-14T15:05Z | OPEN
+Blocked: Awaiting operator's console bug list for CYD terminal / CardKB on v0 prototype.
+Options: Operator provides full console bug list and observations. Recommended default: Itemized list of reproducible anomalies.
+Applies to: Priority 1 (Console Bugs), `pi/terminal/`, CYD display link.
+Answer: <awaiting>
+Reply sent: Awaiting operator's console bug list while gathering background evidence and executing Priority 0 safety net.
+
+## Q-013 | 2026-10-14T15:30Z | ANSWERED
+Blocked: None. Steering received for branch check, untrack interview folder, and guard hook.
+Options:
+  - Branch/Base Check (Section A): Confirm branch, audit 3 interview files, safe push checkpoint, tag `demo-v0-pre`.
+  - Untrack (Section B): Untrack `docs/dev/spec-interview` via `git rm -r --cached`, update `.gitignore`.
+  - Guard Hook (Section C): Delegate `spec-interview-guard` & restore tool to background worker.
+Applies to: Repository safety, tool policy, demo preparation.
+Answer: Proceeding with Section A, B, and C as directed.
+Reply sent: Acknowledged. Worker dispatched for Section C; branch base verified; audit and untrack under way.
+
+INTENT: [2026-10-14] Steering & Safety Net Checkpoint:
+1. Branch/Base Check: Verified on `agent/2026-10-07-initial`, 5 unpushed commits present, `docs/dev/ai-agent-handoff.md` present.
+2. Delegate Section C (guard hook, restore tool, test suite, adapters) to independent subagent worker with disjoint paths.
+3. Audit uncommitted interview files (`0.md`, `contradictions.md`, `notes.md`).
+4. Section B Untrack: `git ls-files` shows 9 tracked files in `docs/dev/spec-interview`; `git log` shows 11 commits already in pushed history on `origin/agent/2026-10-07-initial`. Per instruction: STOP rewrites, do NOT rewrite history; remove from index (`git rm -r --cached`) once initial archive is secured; ensure `.gitignore` covers both interview and archives dirs.
+5. Commit pending demo-critical changes with explicit paths (`product-requirements.md`, Ansible tasks, handoff journal).
+6. Push safe checkpoint via `~/.config/agent-policy/bin/agent-push`.
+7. Apply local tag `demo-v0-pre` to the checkpoint commit.
+8. Safety Net (Priority 0): Check Pi power/connectivity; once online, complete streaming golden SD card image and compute SHA-256.
+
+
