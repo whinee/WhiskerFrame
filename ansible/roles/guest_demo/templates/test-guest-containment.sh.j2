@@ -11,7 +11,7 @@ FAIL=0
 assert_denied() {
     local desc="$1"
     local cmd="$2"
-    if su - "$GUEST_USER" -c "$cmd" >/dev/null 2>&1; then
+    if su - "$GUEST_USER" -c "$cmd" < /dev/null >/dev/null 2>&1; then
         echo "[-] FAIL: $desc (command unexpectedly succeeded)"
         FAIL=$((FAIL + 1))
     else
@@ -41,7 +41,7 @@ assert_denied "Access to su" "su -c true neko"
 # 3. Process Execution Time Limit (5s Reaper)
 echo "--- Testing 5s Process Reaper ---"
 START_T=$(date +%s)
-su - "$GUEST_USER" -c "sleep 12" >/dev/null 2>&1 || true
+su - "$GUEST_USER" -c "sleep 12" < /dev/null >/dev/null 2>&1 || true
 END_T=$(date +%s)
 ELAPSED=$((END_T - START_T))
 if [ "$ELAPSED" -le 7 ]; then
