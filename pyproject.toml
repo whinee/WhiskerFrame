@@ -185,3 +185,7 @@ ignore-overlong-task-comments = false
     "INP001",
     "N999"
 ]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "pi", "src"]
+
