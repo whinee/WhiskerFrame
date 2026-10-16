@@ -212,6 +212,54 @@ Persistence:
   Session state is tracked in runtime storage
   and integrates with tmux when available.
 """.strip(),
+    "power": """
+=== MANUAL: POWER (power) ===
+
+Overview:
+  Three-tier software power management (REQ-PWR-01).
+  Tailors CPU frequency, radio state, storage, and
+  display to optimize battery endurance.
+
+Profiles:
+  active      1.0 GHz (performance/ondemand)
+              Display active, radios unblocked,
+              SSD active (~3.2W typical load).
+  powersave   600 MHz (powersave)
+              Display active, radios on,
+              SSD spun down via hdparm (~1.8W).
+  airplane    600 MHz, all radios blocked (rfkill),
+              display sleep opcode 0x06 (~0.55W).
+
+Commands:
+  wf power status
+  wf power set <active|powersave|airplane>
+  wf power <active|powersave|airplane>
+""".strip(),
+    "profile": """
+=== MANUAL: SENSORY PROFILES (profile) ===
+
+Overview:
+  Sensory audio presets (REQ-ENV-04) and cognitive
+  sensory overload instant mitigation (REQ-INP-08).
+
+Profiles:
+  classroom   Silent stance: buzzer muted (0%),
+              haptics off, visual alerts only.
+  office      Quiet stance: buzzer low (25%),
+              gentle haptics, soft alerts.
+  commute     Loud stance: buzzer full (100%),
+              strong haptics, loud alerts.
+
+Sensory Overload Mitigation (REQ-INP-08):
+  Single command to instantly mute all buzzers,
+  bells, tickers, and auxiliary signals.
+
+Commands:
+  wf profile status
+  wf profile set <classroom|office|commute>
+  wf profile overload [on|off|toggle]
+  wf profile silence
+""".strip(),
 }
 
 # Aliases for manual topics
@@ -229,6 +277,12 @@ MANUAL_ALIASES: dict[str, str] = {
     "workspace": "workspaces",
     "ws": "workspaces",
     "sessions": "workspaces",
+    "power-profile": "power",
+    "pwr": "power",
+    "battery": "power",
+    "sensory": "profile",
+    "audio": "profile",
+    "sound": "profile",
 }
 
 
@@ -242,6 +296,8 @@ def cmd_man(args: list[str]) -> int:
         print_bounded("  demo        Demo sandbox & security limits")
         print_bounded("  terminal    CYD terminal & display engine")
         print_bounded("  workspaces  Multi-terminal workspace manager")
+        print_bounded("  power       Three-tier power management (PWR-01)")
+        print_bounded("  profile     Sensory audio & overload mitigation")
         print_bounded("")
         print_bounded("Usage: wf man <topic>")
         return 0
@@ -255,7 +311,7 @@ def cmd_man(args: list[str]) -> int:
         return 0
 
     print_bounded(f"Error: Unknown manual topic '{topic_raw}'.")
-    print_bounded("Available topics: kb, wifi, demo, terminal, workspaces")
+    print_bounded("Available topics: kb, wifi, demo, terminal, workspaces, power, profile")
     return 1
 
 
@@ -310,6 +366,114 @@ def cmd_wifi(args: list[str]) -> int:
         return proc.returncode
 
     print_bounded("Error: Wi-Fi helper (pi/bin/wifi) not found.")
+    return 1
+
+
+# --- Power Management (REQ-PWR-01) ------------------------------------------
+
+
+def _load_power_module() -> Any | None:
+    """Load pi/bin/power-profile dynamically if available."""
+    candidates = [
+        Path(__file__).resolve().parent / "power-profile",
+        Path("/usr/local/bin/power-profile"),
+        Path("/opt/cyd-display-link/pi/bin/power-profile"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                loader = SourceFileLoader("power_profile_cli", str(p))
+                spec = importlib.util.spec_from_loader("power_profile_cli", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["power_profile_cli"] = mod
+                    loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def cmd_power(args: list[str]) -> int:
+    """Manage cyberdeck power profiles (REQ-PWR-01)."""
+    pwr_mod = _load_power_module()
+    if pwr_mod is not None:
+        try:
+            return int(pwr_mod.main(args))
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+
+    # Subprocess fallback
+    candidates = [
+        Path(__file__).resolve().parent / "power-profile",
+        Path("/usr/local/bin/power-profile"),
+        Path("/opt/cyd-display-link/pi/bin/power-profile"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args)
+            return proc.returncode
+
+    pwr_in_path = shutil.which("power-profile")
+    if pwr_in_path:
+        proc = subprocess.run([pwr_in_path] + args)
+        return proc.returncode
+
+    print_bounded("Error: Power profile helper (pi/bin/power-profile) not found.")
+    return 1
+
+
+# --- Sensory & Environmental Audio Profiles (REQ-ENV-04, REQ-INP-08) --------
+
+
+def _load_profile_module() -> Any | None:
+    """Load pi/bin/profile dynamically if available."""
+    candidates = [
+        Path(__file__).resolve().parent / "profile",
+        Path("/usr/local/bin/profile"),
+        Path("/opt/cyd-display-link/pi/bin/profile"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                loader = SourceFileLoader("sensory_profile_cli", str(p))
+                spec = importlib.util.spec_from_loader("sensory_profile_cli", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["sensory_profile_cli"] = mod
+                    loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def cmd_profile(args: list[str]) -> int:
+    """Manage cyberdeck sensory & environmental audio profiles."""
+    prof_mod = _load_profile_module()
+    if prof_mod is not None:
+        try:
+            return int(prof_mod.main(args))
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+
+    # Subprocess fallback
+    candidates = [
+        Path(__file__).resolve().parent / "profile",
+        Path("/usr/local/bin/profile"),
+        Path("/opt/cyd-display-link/pi/bin/profile"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args)
+            return proc.returncode
+
+    prof_in_path = shutil.which("profile")
+    if prof_in_path:
+        proc = subprocess.run([prof_in_path] + args)
+        return proc.returncode
+
+    print_bounded("Error: Sensory profile helper (pi/bin/profile) not found.")
     return 1
 
 
@@ -659,12 +823,14 @@ def print_main_help() -> int:
     print_bounded("  help        Show command reference")
     print_bounded("  man         Offline manual & reference")
     print_bounded("  wifi        Manage Wi-Fi network")
+    print_bounded("  power       Manage power profiles (REQ-PWR-01)")
+    print_bounded("  profile     Sensory audio & overload (REQ-ENV-04)")
     print_bounded("  demo        Launch demo sandbox")
     print_bounded("  demo art    Display artwork on CYD")
     print_bounded("  terminal    Manage terminal sessions")
     print_bounded("  workspace   Manage workspaces (alias)")
     print_bounded("")
-    print_bounded("Manual topics: kb, wifi, demo, terminal, workspaces")
+    print_bounded("Manual topics: kb, wifi, demo, terminal, workspaces, power, profile")
     print_bounded("For help on a command: wf help <subcommand>")
     return 0
 
@@ -688,6 +854,8 @@ def cmd_help(args: list[str]) -> int:
         print_bounded("  demo        Sandbox limits & containment")
         print_bounded("  terminal    CYD display & protocol engine")
         print_bounded("  workspaces  Multi-terminal session manager")
+        print_bounded("  power       Three-tier power management")
+        print_bounded("  profile     Sensory audio & overload mitigation")
         return 0
     elif target in ("wifi", "wlan"):
         print_bounded("=== Help: wf wifi ===")
@@ -699,6 +867,25 @@ def cmd_help(args: list[str]) -> int:
         print_bounded("  wf wifi scan")
         print_bounded("  wf wifi join <N|SSID> [-p PASS] [--hidden]")
         print_bounded("  wf wifi forget <SSID>")
+        return 0
+    elif target in ("power", "power-profile", "pwr"):
+        print_bounded("=== Help: wf power ===")
+        print_bounded("Three-tier power management (REQ-PWR-01).")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf power status [--json]")
+        print_bounded("  wf power set <active|powersave|airplane>")
+        print_bounded("  wf power <active|powersave|airplane>")
+        return 0
+    elif target in ("profile", "sensory", "audio"):
+        print_bounded("=== Help: wf profile ===")
+        print_bounded("Sensory audio presets and overload mitigation.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf profile status [--json]")
+        print_bounded("  wf profile set <classroom|office|commute>")
+        print_bounded("  wf profile overload [on|off|toggle]")
+        print_bounded("  wf profile silence")
         return 0
     elif target in ("demo", "sandbox", "art"):
         print_bounded("=== Help: wf demo ===")
@@ -743,6 +930,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_man(sub_args)
     elif cmd == "wifi":
         return cmd_wifi(sub_args)
+    elif cmd in ("power", "power-profile", "pwr"):
+        return cmd_power(sub_args)
+    elif cmd in ("profile", "sensory", "audio"):
+        return cmd_profile(sub_args)
     elif cmd == "demo":
         return cmd_demo(sub_args)
     elif cmd in ("terminal", "workspace", "workspaces"):

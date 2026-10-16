@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""
+WhiskerFrame Power Profile Management Utility (REQ-PWR-01, DEC-W21).
+
+Manages three-tier software power profiles for the cyberdeck:
+  1. ACTIVE: 1.0 GHz CPU (performance/ondemand), display active, radios unblocked, SSD active (~3.2W).
+  2. POWERSAVE / IDLE: 600 MHz CPU (powersave), display active/dimmed, SSD spun down, timers throttled (~1.8W).
+  3. AIRPLANE / DEEP-IDLE: 600 MHz CPU, all radios blocked via rfkill, display sleep opcode 0x06 (~0.55W).
+
+Outputs formatted strictly <= 53 columns or as machine-readable JSON.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import textwrap
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+MAX_COLUMNS: int = 53
+STATE_DIRS: list[Path] = [
+    Path("/run/whiskerframe"),
+    Path("/tmp/whiskerframe"),  # noqa: S108
+    Path("/tmp"),  # noqa: S108
+]
+STATE_FILE_NAME: str = "power_profile.json"
+
+PROFILES: dict[str, dict[str, Any]] = {
+    "active": {
+        "name": "ACTIVE",
+        "description": "Full performance (1.0 GHz), radios on, SSD active",
+        "governor": "ondemand",
+        "fallback_governor": "performance",
+        "radios_blocked": False,
+        "ssd_standby": False,
+        "display_sleep": False,
+        "estimated_power_watts": 3.2,
+    },
+    "powersave": {
+        "name": "POWERSAVE",
+        "description": "Throttled CPU (600 MHz), SSD spun down, radios on",
+        "governor": "powersave",
+        "fallback_governor": "powersave",
+        "radios_blocked": False,
+        "ssd_standby": True,
+        "display_sleep": False,
+        "estimated_power_watts": 1.8,
+    },
+    "airplane": {
+        "name": "AIRPLANE",
+        "description": "All radios blocked (rfkill), display sleep, 600 MHz",
+        "governor": "powersave",
+        "fallback_governor": "powersave",
+        "radios_blocked": True,
+        "ssd_standby": True,
+        "display_sleep": True,
+        "estimated_power_watts": 0.55,
+    },
+}
+
+# Alias map for ergonomics
+PROFILE_ALIASES: dict[str, str] = {
+    "active": "active",
+    "perf": "active",
+    "high": "active",
+    "powersave": "powersave",
+    "idle": "powersave",
+    "low": "powersave",
+    "save": "powersave",
+    "airplane": "airplane",
+    "deep-idle": "airplane",
+    "deep_idle": "airplane",
+    "flight": "airplane",
+    "sleep": "airplane",
+}
+
+
+def wrap_text(text: str, width: int = MAX_COLUMNS) -> list[str]:
+    """Wrap multiline or long text strictly within width columns."""
+    if not text:
+        return [""]
+    out: list[str] = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            out.append(line)
+        else:
+            out.extend(textwrap.wrap(line, width=width, break_long_words=True))
+    return out
+
+
+def print_bounded(*args: Any, sep: str = " ") -> None:
+    """Print message with all lines strictly constrained to MAX_COLUMNS."""
+    raw = sep.join(str(a) for a in args)
+    for line in wrap_text(raw, MAX_COLUMNS):
+        print(line)
+
+
+def get_state_path() -> Path:
+    """Resolve writable path for state persistence."""
+    override = os.environ.get("WHISKERFRAME_POWER_STATE")
+    if override:
+        return Path(override)
+    for d in STATE_DIRS:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            candidate = d / STATE_FILE_NAME
+            if candidate.exists() or os.access(str(d), os.W_OK):
+                return candidate
+        except (OSError, PermissionError):
+            continue
+    return Path("/tmp") / STATE_FILE_NAME  # noqa: S108
+
+
+@dataclass
+class PowerState:
+    profile: str
+    governor: str
+    radios_blocked: bool
+    ssd_standby: bool
+    display_sleep: bool
+    estimated_power_watts: float
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def load_state() -> PowerState:
+    """Load stored power profile state, defaulting to active."""
+    path = get_state_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            prof = data.get("profile", "active").lower()
+            if prof in PROFILES:
+                return PowerState(
+                    profile=prof,
+                    governor=data.get("governor", PROFILES[prof]["governor"]),
+                    radios_blocked=bool(data.get("radios_blocked", False)),
+                    ssd_standby=bool(data.get("ssd_standby", False)),
+                    display_sleep=bool(data.get("display_sleep", False)),
+                    estimated_power_watts=float(data.get("estimated_power_watts", PROFILES[prof]["estimated_power_watts"])),
+                    updated_at=str(data.get("updated_at", "")),
+                )
+        except (OSError, ValueError):
+            pass
+
+    # Default initial state
+    import datetime
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return PowerState(
+        profile="active",
+        governor=PROFILES["active"]["governor"],
+        radios_blocked=False,
+        ssd_standby=False,
+        display_sleep=False,
+        estimated_power_watts=PROFILES["active"]["estimated_power_watts"],
+        updated_at=now_str,
+    )
+
+
+def save_state(state: PowerState) -> None:
+    """Persist power profile state."""
+    path = get_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+    except (OSError, PermissionError):
+        pass
+
+
+# --- Hardware Action Primitives (Safe with mocks / fallbacks) ----------------
+
+
+def apply_cpu_governor(governor: str, fallback_gov: str) -> tuple[bool, str]:
+    """Set CPU frequency scaling governor across available cores."""
+    gov_target = governor
+    applied = False
+    cpu_dir = Path("/sys/devices/system/cpu")
+    if not cpu_dir.is_dir():
+        return True, f"simulated({governor})"
+
+    for cpu in cpu_dir.glob("cpu[0-9]*"):
+        gov_file = cpu / "cpufreq" / "scaling_governor"
+        avail_file = cpu / "cpufreq" / "scaling_available_governors"
+        if gov_file.exists():
+            avail: list[str] = []
+            if avail_file.exists():
+                try:
+                    avail = avail_file.read_text(encoding="utf-8").split()
+                except OSError:
+                    avail = []
+            target = gov_target
+            if avail and gov_target not in avail:
+                target = fallback_gov if fallback_gov in avail else avail[0]
+            try:
+                gov_file.write_text(target, encoding="utf-8")
+                applied = True
+            except (OSError, PermissionError):
+                pass
+    return applied or not cpu_dir.is_dir(), gov_target
+
+
+def apply_rfkill(block: bool) -> tuple[bool, str]:
+    """Block or unblock wireless radios via rfkill."""
+    rfkill_bin = shutil.which("rfkill")
+    if not rfkill_bin:
+        return True, "rfkill_not_installed"
+    verb = "block" if block else "unblock"
+    try:
+        res = subprocess.run(
+            [rfkill_bin, verb, "all"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return res.returncode == 0, f"rfkill {verb} all"
+    except OSError as err:
+        return False, str(err)
+
+
+def apply_ssd_standby(standby: bool) -> tuple[bool, str]:
+    """Put external SSD into low-power standby if configured."""
+    if not standby:
+        return True, "ssd_active"
+    hdparm_bin = shutil.which("hdparm")
+    if not hdparm_bin:
+        return True, "hdparm_not_installed"
+    # Find SATA SSD node (e.g. /dev/sda)
+    target_disk = None
+    for cand in ("/dev/sda", "/dev/sdb"):
+        if os.path.exists(cand):
+            target_disk = cand
+            break
+    if not target_disk:
+        return True, "no_sda_detected"
+    try:
+        res = subprocess.run(
+            [hdparm_bin, "-y", target_disk],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return res.returncode == 0, f"hdparm -y {target_disk}"
+    except OSError as err:
+        return False, str(err)
+
+
+def apply_display_sleep(sleep: bool) -> tuple[bool, str]:
+    """Signal display sleep to coprocessor via opcode 0x06 if sleeping."""
+    if not sleep:
+        return True, "display_awake"
+    # If goodbye_hook exists, it handles 0x06 sleep
+    hook_bin = Path(__file__).resolve().parent / "goodbye_hook"
+    if hook_bin.is_file() and os.access(str(hook_bin), os.X_OK):
+        try:
+            # Invoking goodbye_hook with --sleep flag sends opcode 0x06 without shutdown
+            res = subprocess.run(
+                [str(hook_bin), "--sleep-only"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=3,
+            )
+            return res.returncode == 0, "goodbye_hook_sleep"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return True, "display_sleep_signaled"
+
+
+def apply_profile(profile_key: str) -> PowerState:
+    """Apply the specified power profile across subsystems."""
+    import datetime
+    key = PROFILE_ALIASES.get(profile_key.lower().strip())
+    if not key or key not in PROFILES:
+        raise ValueError(f"Unknown power profile '{profile_key}'. Valid: {list(PROFILES.keys())}")
+
+    spec = PROFILES[key]
+    apply_cpu_governor(spec["governor"], spec["fallback_governor"])
+    apply_rfkill(spec["radios_blocked"])
+    apply_ssd_standby(spec["ssd_standby"])
+    apply_display_sleep(spec["display_sleep"])
+
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    new_state = PowerState(
+        profile=key,
+        governor=spec["governor"],
+        radios_blocked=spec["radios_blocked"],
+        ssd_standby=spec["ssd_standby"],
+        display_sleep=spec["display_sleep"],
+        estimated_power_watts=spec["estimated_power_watts"],
+        updated_at=now_str,
+    )
+    save_state(new_state)
+    return new_state
+
+
+# --- CLI Commands ------------------------------------------------------------
+
+
+def cmd_status(json_output: bool = False) -> int:
+    """Print current power profile status."""
+    state = load_state()
+    spec = PROFILES.get(state.profile, PROFILES["active"])
+
+    if json_output:
+        out = state.to_dict()
+        out["spec"] = spec
+        print(json.dumps(out, indent=2))
+        return 0
+
+    print_bounded("=== WhiskerFrame Power Profile ===")
+    print_bounded(f"Profile:    {spec['name']}")
+    print_bounded(f"Governor:   {state.governor}")
+    print_bounded(f"Radios:     {'BLOCKED (rfkill)' if state.radios_blocked else 'ACTIVE (unblocked)'}")
+    print_bounded(f"SSD State:  {'STANDBY (spun down)' if state.ssd_standby else 'ACTIVE'}")
+    print_bounded(f"Display:    {'SLEEP (0x06)' if state.display_sleep else 'ACTIVE'}")
+    print_bounded(f"Est. Power: ~{state.estimated_power_watts:.2f} W")
+    if state.updated_at:
+        print_bounded(f"Applied:    {state.updated_at[:19]}")
+    print_bounded("")
+    print_bounded("Available profiles: active, powersave, airplane")
+    return 0
+
+
+def cmd_set(target: str, json_output: bool = False) -> int:
+    """Switch to a new power profile."""
+    try:
+        new_state = apply_profile(target)
+    except ValueError as err:
+        if json_output:
+            print(json.dumps({"error": str(err)}, indent=2))
+        else:
+            print_bounded(f"Error: {err}")
+        return 1
+
+    if json_output:
+        print(json.dumps(new_state.to_dict(), indent=2))
+        return 0
+
+    spec = PROFILES[new_state.profile]
+    print_bounded(f"Switched to power profile: {spec['name']}")
+    print_bounded(f"  CPU Governor: {new_state.governor}")
+    print_bounded(f"  Radios:       {'BLOCKED' if new_state.radios_blocked else 'ACTIVE'}")
+    print_bounded(f"  Est. Power:   ~{new_state.estimated_power_watts:.2f} W")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    parser = argparse.ArgumentParser(
+        prog="power-profile",
+        description="WhiskerFrame Cyberdeck Power Management Profile CLI (REQ-PWR-01)",
+        add_help=False,
+    )
+    parser.add_argument("command", nargs="?", default="status", help="Command: status, set, get, active, powersave, airplane")
+    parser.add_argument("target", nargs="?", default=None, help="Target profile for 'set'")
+    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    parser.add_argument("-h", "--help", action="store_true", help="Show usage help")
+
+    args = parser.parse_args(argv)
+
+    if args.help:
+        print_bounded("=== WhiskerFrame Power Management ===")
+        print_bounded("Usage:")
+        print_bounded("  power-profile [status] [--json]")
+        print_bounded("  power-profile set <active|powersave|airplane>")
+        print_bounded("  power-profile get")
+        print_bounded("  power-profile <active|powersave|airplane>")
+        print_bounded("")
+        print_bounded("Profiles (REQ-PWR-01):")
+        print_bounded("  active      1.0 GHz, radios on, SSD active (~3.2W)")
+        print_bounded("  powersave   600 MHz, SSD spin down (~1.8W)")
+        print_bounded("  airplane    Radios blocked, display sleep (~0.55W)")
+        return 0
+
+    cmd = (args.command or "status").lower().strip()
+
+    if cmd == "status":
+        return cmd_status(json_output=args.json)
+    elif cmd == "get":
+        state = load_state()
+        if args.json:
+            print(json.dumps({"profile": state.profile}))
+        else:
+            print(state.profile)
+        return 0
+    elif cmd == "set":
+        target = args.target
+        if not target:
+            print_bounded("Error: 'set' requires a target profile.")
+            print_bounded("Usage: power-profile set <active|powersave|airplane>")
+            return 1
+        return cmd_set(target, json_output=args.json)
+    elif cmd in PROFILE_ALIASES:
+        return cmd_set(cmd, json_output=args.json)
+    else:
+        print_bounded(f"Error: Unknown command '{cmd}'.")
+        print_bounded("Valid commands: status, set, get, active, powersave, airplane")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
