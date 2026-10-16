@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -170,7 +170,7 @@ class TestCtrlLatchProperties(unittest.TestCase):
         self.master_fd = 888
 
     @given(st.sampled_from(sorted(_CTRL_VALID_CHARS)))
-    @settings(max_examples=100)
+    @settings(max_examples=100, suppress_health_check=[HealthCheck.differing_executors])
     def test_property_all_valid_chars_transformed(self, char_int: int) -> None:
         """Any valid Ctrl character must yield char & 0x1F and disarm latch."""
         key_queue = KeyQueue(iter([]))
@@ -198,7 +198,7 @@ class TestCtrlLatchProperties(unittest.TestCase):
             lambda x: x not in _CTRL_VALID_CHARS,
         ),
     )
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.differing_executors])
     def test_property_non_ctrl_ascii_unmodified(self, char_int: int) -> None:
         """Characters outside _CTRL_VALID_CHARS pass through unmodified and disarm."""
         key_queue = KeyQueue(iter([]))

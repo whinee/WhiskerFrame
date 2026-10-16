@@ -38,7 +38,7 @@ import termios
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from whiskerframe.metrics import FONT_METRICS
 from whiskerframe.models import DrawRect
@@ -798,12 +798,32 @@ class _ShellSession:
         self._ctrl_armed: bool = False
         self._ctrl_armed_at: float = 0.0
 
+    def _arm_ctrl(self) -> None:
+        """
+        Arm the sticky Ctrl latch, recoloring cursor yellow and setting NeoPixel.
+        """
+        self._ctrl_armed = True
+        self._ctrl_armed_at = time.monotonic()
+        self._bridge.set_ctrl_led(True)
+        self._paint_session()
+
+    def _disarm_ctrl(self, repaint: bool = True) -> None:
+        """
+        Disarm the sticky Ctrl latch, clearing NeoPixel and resetting cursor.
+        """
+        if self._ctrl_armed:
+            self._ctrl_armed = False
+            self._bridge.set_ctrl_led(False)
+            if repaint:
+                self._paint_session()
+
     def _is_ctrl_armed(self) -> bool:
         """
         Return whether the sticky Ctrl modifier latch is currently armed.
 
         A latch automatically expires if more than :data:`CTRL_LATCH_TIMEOUT_S`
-        seconds elapse without a qualifying keystroke.
+        seconds elapse without a qualifying keystroke. When expired, immediately
+        resets NeoPixel and cursor indicator.
 
         Returns:
         `bool`: ``True`` if armed and unexpired, else ``False``.
@@ -812,8 +832,7 @@ class _ShellSession:
         if not self._ctrl_armed:
             return False
         if time.monotonic() - self._ctrl_armed_at > CTRL_LATCH_TIMEOUT_S:
-            self._ctrl_armed = False
-            self._bridge.set_ctrl_led(False)
+            self._disarm_ctrl(repaint=True)
             return False
         return True
 
@@ -842,14 +861,11 @@ class _ShellSession:
         try:
             while running:
                 running = self._read_pty()
-                was_armed = self._ctrl_armed
                 self._drain_keys()
-                if was_armed and not self._is_ctrl_armed():
-                    self._paint_session()
+                self._is_ctrl_armed()
                 self._maybe_keyframe()
         finally:
-            self._ctrl_armed = False
-            self._bridge.set_ctrl_led(False)
+            self._disarm_ctrl(repaint=False)
 
     def _paint_session(self) -> None:
         """
@@ -864,7 +880,7 @@ class _ShellSession:
         """
         cursor_bg = (
             self._bridge._theme.ansi[11]
-            if self._is_ctrl_armed()
+            if self._ctrl_armed
             else self._bridge._theme.cursor
         )
         display_grid = self._grid.render_with_cursor(
@@ -957,8 +973,7 @@ class _ShellSession:
         """
         if key in RESIZE_CHORDS:
             if self._ctrl_armed:
-                self._ctrl_armed = False
-                self._bridge.set_ctrl_led(False)
+                self._disarm_ctrl(repaint=False)
             self._grid = self._bridge._rebuild_geometry(self._master_fd)
             self._emulator = VTEmulator(self._grid, self._bridge._theme)
             self._paint_session()
@@ -966,13 +981,9 @@ class _ShellSession:
 
         if key in CTRL_LATCH_CHORDS:
             if self._is_ctrl_armed():
-                self._ctrl_armed = False
-                self._bridge.set_ctrl_led(False)
+                self._disarm_ctrl(repaint=True)
             else:
-                self._ctrl_armed = True
-                self._ctrl_armed_at = time.monotonic()
-                self._bridge.set_ctrl_led(True)
-            self._paint_session()
+                self._arm_ctrl()
             return True
 
         return None
@@ -988,9 +999,7 @@ class _ShellSession:
         `bytes | None`: Resolved PTY payload.
 
         """
-        self._ctrl_armed = False
-        self._bridge.set_ctrl_led(False)
-        self._paint_session()
+        self._disarm_ctrl(repaint=True)
         if key in _CTRL_VALID_CHARS:
             return bytes((key & 0x1F,))
         return self._resolve_key_payload(key)
