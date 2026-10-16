@@ -1,9 +1,9 @@
 # WhiskerFrame Cyberdeck Acceptance Test Suite Report
 
-**Run Timestamp:** 2026-10-16 15:07:16 UTC  
+**Run Timestamp:** 2026-10-16 18:12:39 UTC  
 **Target Milestone:** `v0` (Demo Prototype) / `v1` (Field Hardened)  
-**Overall Result:** 1 FAILED (92.3%)  
-**Total Duration:** 26.95 seconds  
+**Overall Result:** 100% PASSED (100.0%)  
+**Total Duration:** 34.57 seconds  
 **Reference Document:** `docs/dev/feature-inventory-and-acceptance-tests.md`  
 
 ---
@@ -12,19 +12,19 @@
 
 | ID | Test Plan Title | Subsystem | Milestone | Criteria | Assertions | Status | Duration |
 |---|---|---|---|---|---|---|---|
-| **ATP-01-TERM-LOGIN** | Terminal Live Login & PAM su Authentication | Terminal Core | `v0` | REQ-TERM-01, REQ-TERM-02, REQ-TERM-04 | 7/7 | **PASS** | 0.19s |
-| **ATP-02-INP-CTRL-LATCH** | Sticky Ctrl Latch (Fn+Tab) & SK6812 NeoPixel Yellow Feedback | Input Subsystem | `v0` | REQ-INP-03, REQ-INP-04, REQ-INP-05 | 4/4 | **PASS** | 0.76s |
+| **ATP-01-TERM-LOGIN** | Terminal Live Login & PAM su Authentication | Terminal Core | `v0` | REQ-TERM-01, REQ-TERM-02, REQ-TERM-04 | 7/7 | **PASS** | 0.27s |
+| **ATP-02-INP-CTRL-LATCH** | Sticky Ctrl Latch (Fn+Tab) & SK6812 NeoPixel Yellow Feedback | Input Subsystem | `v0` | REQ-INP-03, REQ-INP-04, REQ-INP-05 | 4/4 | **PASS** | 0.83s |
 | **ATP-03-TYPO-GEOMETRY** | Multi-Geometry Font Cycling (Fn+Backspace) & 8x12 Typography | Typography | `v0/v1` | REQ-TERM-02, REQ-TERM-03, REQ-UX-08 | 3/3 | **PASS** | 0.02s |
 | **ATP-04-SEC-GUEST-CONTAINMENT** | Guest Demo Sandbox Containment & Abuse Rejection | Guest Sandbox | `v0` | REQ-OPS-04, REQ-SEC-01, REQ-CAP-03 | 7/7 | **PASS** | 0.00s |
-| **ATP-05-LIFE-GOODBYE** | Goodbye & Reboot Splash Hooks | System Lifecycle | `v0` | REQ-UX-05, REQ-UX-09, REQ-TERM-01 | 3/3 | **PASS** | 0.25s |
-| **ATP-06-NET-WIFI-HELPER** | 53-Column Wi-Fi CLI (pi/bin/wifi) & Captive Portal Detection | Network UX | `v0` | REQ-NET-01, REQ-NET-02 | 4/4 | **PASS** | 0.00s |
+| **ATP-05-LIFE-GOODBYE** | Goodbye & Reboot Splash Hooks | System Lifecycle | `v0` | REQ-UX-05, REQ-UX-09, REQ-TERM-01 | 3/3 | **PASS** | 0.24s |
+| **ATP-06-NET-WIFI-HELPER** | 53-Column Wi-Fi CLI (pi/bin/wifi) & Captive Portal Detection | Network UX | `v0` | REQ-NET-01, REQ-NET-02 | 4/4 | **PASS** | 0.01s |
 | **ATP-07-STOR-BTRFS-SWAP** | Persistent BTRFS Mount & Swap Priority Hierarchy | Storage Subsystem | `v0` | REQ-STORAGE-01, REQ-STORAGE-02, REQ-STORAGE-03 | 3/3 | **PASS** | 0.01s |
-| **ATP-08-NET-SELF-HEAL** | Wi-Fi Cold Boot Persistence & 3-Tier Self-Healing Watchdog | Network UX (Self-Healing) | `v0` | REQ-NET-03, REQ-NET-04, REQ-OPS-03 | 3/3 | **PASS** | 6.06s |
-| **ATP-09-HW-BATTERY-THERMAL** | Battery Monitor & Thermal Telemetry Service | Hardware Telemetry | `v0` | REQ-HW-04, REQ-PWR-01, REQ-PWR-02 | 4/4 | **PASS** | 0.10s |
-| **ATP-10-DISP-DRAW-IMAGE** | Coprocessor Binary Image Blitting (0x05 DRAW_IMAGE) & Grid Repaint | Display Link (Image Blitting) | `v0` | REQ-TERM-07, REQ-UX-05 | 3/3 | **PASS** | 1.67s |
-| **ATP-11-TERM-WORKSPACES** | Multi-PTY Terminal Workspaces & CardKB Switching Chords | Terminal Core (Workspaces) | `v0` | REQ-TERM-05 | 2/3 | **FAIL** | 16.74s |
-| **ATP-12-CAP-OFFLINE-WIKI** | Offline Documentation Helper (pi/bin/wiki) | Documentation & CLI (Offline Wiki) | `v0` | REQ-CAP-01, REQ-CAP-02 | 3/3 | **PASS** | 0.86s |
-| **ATP-13-PWR-SENSORY-PROFILES** | Three-Tier Power Profiles & Sensory Audio Overload Mitigation | Power & Sensory Core | `v0` | REQ-PWR-01, REQ-ENV-04, REQ-INP-08, REQ-INP-07, REQ-ENV-03 | 6/6 | **PASS** | 0.29s |
+| **ATP-08-NET-SELF-HEAL** | Wi-Fi Cold Boot Persistence & 3-Tier Self-Healing Watchdog | Network UX (Self-Healing) | `v0` | REQ-NET-03, REQ-NET-04, REQ-OPS-03 | 3/3 | **PASS** | 6.04s |
+| **ATP-09-HW-BATTERY-THERMAL** | Battery Monitor & Thermal Telemetry Service | Hardware Telemetry | `v0` | REQ-HW-04, REQ-PWR-01, REQ-PWR-02 | 4/4 | **PASS** | 0.08s |
+| **ATP-10-DISP-DRAW-IMAGE** | Coprocessor Binary Image Blitting (0x05 DRAW_IMAGE) & Grid Repaint | Display Link (Image Blitting) | `v0` | REQ-TERM-07, REQ-UX-05 | 3/3 | **PASS** | 1.49s |
+| **ATP-11-TERM-WORKSPACES** | Multi-PTY Terminal Workspaces & CardKB Switching Chords | Terminal Core (Workspaces) | `v0` | REQ-TERM-05 | 3/3 | **PASS** | 24.30s |
+| **ATP-12-CAP-OFFLINE-WIKI** | Offline Documentation Helper (pi/bin/wiki) | Documentation & CLI (Offline Wiki) | `v0` | REQ-CAP-01, REQ-CAP-02 | 3/3 | **PASS** | 0.97s |
+| **ATP-13-PWR-SENSORY-PROFILES** | Three-Tier Power Profiles & Sensory Audio Overload Mitigation | Power & Sensory Core | `v0` | REQ-PWR-01, REQ-ENV-04, REQ-INP-08, REQ-INP-07, REQ-ENV-03 | 6/6 | **PASS** | 0.31s |
 
 ---
 
@@ -35,7 +35,7 @@
 - **Subsystem:** Terminal Core
 - **Requirements Addressed:** `REQ-TERM-01, REQ-TERM-02, REQ-TERM-04`
 - **Architectural Tickets & Decisions:** `TSK-01, TSK-11, DEC-W29`
-- **Execution Time:** 0.189 seconds
+- **Execution Time:** 0.268 seconds
 - **Assertions Result:** 7 of 7 passed
 
 **Verified Acceptance Assertions:**
@@ -52,7 +52,7 @@
 - **Subsystem:** Input Subsystem
 - **Requirements Addressed:** `REQ-INP-03, REQ-INP-04, REQ-INP-05`
 - **Architectural Tickets & Decisions:** `TSK-12, TSK-16, TSK-19, DEC-W29, DEC-W30, DEC-W33`
-- **Execution Time:** 0.755 seconds
+- **Execution Time:** 0.830 seconds
 - **Assertions Result:** 4 of 4 passed
 
 **Verified Acceptance Assertions:**
@@ -66,7 +66,7 @@
 - **Subsystem:** Typography
 - **Requirements Addressed:** `REQ-TERM-02, REQ-TERM-03, REQ-UX-08`
 - **Architectural Tickets & Decisions:** `TSK-18, DEC-W30, DEC-W32`
-- **Execution Time:** 0.023 seconds
+- **Execution Time:** 0.022 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -96,7 +96,7 @@
 - **Subsystem:** System Lifecycle
 - **Requirements Addressed:** `REQ-UX-05, REQ-UX-09, REQ-TERM-01`
 - **Architectural Tickets & Decisions:** `TSK-13, TSK-16, DEC-W30, DEC-W31`
-- **Execution Time:** 0.247 seconds
+- **Execution Time:** 0.239 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -109,7 +109,7 @@
 - **Subsystem:** Network UX
 - **Requirements Addressed:** `REQ-NET-01, REQ-NET-02`
 - **Architectural Tickets & Decisions:** `TSK-14, DEC-W29, DEC-W30`
-- **Execution Time:** 0.004 seconds
+- **Execution Time:** 0.006 seconds
 - **Assertions Result:** 4 of 4 passed
 
 **Verified Acceptance Assertions:**
@@ -123,7 +123,7 @@
 - **Subsystem:** Storage Subsystem
 - **Requirements Addressed:** `REQ-STORAGE-01, REQ-STORAGE-02, REQ-STORAGE-03`
 - **Architectural Tickets & Decisions:** `TSK-02, TSK-02a, TSK-07, DEC-W7, DEC-W11, DEC-W12`
-- **Execution Time:** 0.009 seconds
+- **Execution Time:** 0.012 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -136,7 +136,7 @@
 - **Subsystem:** Network UX (Self-Healing)
 - **Requirements Addressed:** `REQ-NET-03, REQ-NET-04, REQ-OPS-03`
 - **Architectural Tickets & Decisions:** `TSK-08, TSK-09, DEC-W25, DEC-W26`
-- **Execution Time:** 6.059 seconds
+- **Execution Time:** 6.044 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -149,7 +149,7 @@
 - **Subsystem:** Hardware Telemetry
 - **Requirements Addressed:** `REQ-HW-04, REQ-PWR-01, REQ-PWR-02`
 - **Architectural Tickets & Decisions:** `TSK-01, DEC-W17, DEC-W21`
-- **Execution Time:** 0.100 seconds
+- **Execution Time:** 0.083 seconds
 - **Assertions Result:** 4 of 4 passed
 
 **Verified Acceptance Assertions:**
@@ -163,7 +163,7 @@
 - **Subsystem:** Display Link (Image Blitting)
 - **Requirements Addressed:** `REQ-TERM-07, REQ-UX-05`
 - **Architectural Tickets & Decisions:** `TSK-01, TSK-21, DEC-W5, DEC-W35`
-- **Execution Time:** 1.672 seconds
+- **Execution Time:** 1.486 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -171,32 +171,17 @@
 - [x] 2-row chunking partitions 320x240 frame into exactly 120 chunks of 1,280 bytes
 - [x] TestDemoArt suite (25 tests: scaling, packing, chunking, grid restoration)
 
-### [FAIL] ATP-11-TERM-WORKSPACES: Multi-PTY Terminal Workspaces & CardKB Switching Chords
+### [PASS] ATP-11-TERM-WORKSPACES: Multi-PTY Terminal Workspaces & CardKB Switching Chords
 
 - **Subsystem:** Terminal Core (Workspaces)
 - **Requirements Addressed:** `REQ-TERM-05`
 - **Architectural Tickets & Decisions:** `TSK-22, DEC-W36`
-- **Execution Time:** 16.740 seconds
-- **Assertions Result:** 2 of 3 passed
+- **Execution Time:** 24.297 seconds
+- **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
 - [x] CardKB chords Fn+1..Fn+4 (0x81..0x84) map to workspaces 1..4
-- [ ] TestWorkspaces unit suite (13 tests: multiplexing, differential repaint) — *1 failures, 0 errors:
-======================================================================
-FAIL: test_ipc_list_and_status (test.test_workspaces.TestWorkspaceIPCAndClient.test_ipc_list_and_status)
-WorkspaceClient list() and status() return structured workspace information.
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "/home/lyra/systems/P01 Lyra Personal/90-99 Portfolio of Outputs/9008 Cyberdeck/test/test_workspaces.py", line 257, in test_ipc_list_and_status
-    self.assertEqual(reply.get("active"), 1)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: 0 != 1
-
-----------------------------------------------------------------------
-Ran 13 tests in 0.114s
-
-FAILED (failures=1)
-*
+- [x] TestWorkspaces unit suite (13 tests: multiplexing, differential repaint)
 - [x] TestTerminalPtySoak 10,000 keystroke soak (1 tests: zero leaks/deadlocks)
 
 ### [PASS] ATP-12-CAP-OFFLINE-WIKI: Offline Documentation Helper (pi/bin/wiki)
@@ -204,7 +189,7 @@ FAILED (failures=1)
 - **Subsystem:** Documentation & CLI (Offline Wiki)
 - **Requirements Addressed:** `REQ-CAP-01, REQ-CAP-02`
 - **Architectural Tickets & Decisions:** `TSK-15, DEC-W29`
-- **Execution Time:** 0.856 seconds
+- **Execution Time:** 0.972 seconds
 - **Assertions Result:** 3 of 3 passed
 
 **Verified Acceptance Assertions:**
@@ -217,7 +202,7 @@ FAILED (failures=1)
 - **Subsystem:** Power & Sensory Core
 - **Requirements Addressed:** `REQ-PWR-01, REQ-ENV-04, REQ-INP-08, REQ-INP-07, REQ-ENV-03`
 - **Architectural Tickets & Decisions:** `DEC-W21, DEC-W17, DEC-W19`
-- **Execution Time:** 0.290 seconds
+- **Execution Time:** 0.309 seconds
 - **Assertions Result:** 6 of 6 passed
 
 **Verified Acceptance Assertions:**
@@ -233,7 +218,7 @@ FAILED (failures=1)
 ## 3. Acceptance Sign-Off
 
 - **Total Test Plans Evaluated:** 13
-- **Passed:** 12
-- **Failed:** 1
-- **Acceptance Pass Rate:** 92.3%
+- **Passed:** 13
+- **Failed:** 0
+- **Acceptance Pass Rate:** 100.0%
 - **Status:** 100% of defined acceptance criteria verified and passed per specification invariants.
