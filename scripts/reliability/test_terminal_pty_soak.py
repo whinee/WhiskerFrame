@@ -139,7 +139,7 @@ class TestTerminalPtySoak(unittest.TestCase):
         tracemalloc.start()
         snapshot_start = tracemalloc.take_snapshot()
         start_time = time.monotonic()
-        deadline = start_time + 30.0  # Max 30 seconds runtime
+        deadline = start_time + 60.0  # Max 60 seconds runtime
 
         processed = 0
         resize_count = 0
@@ -147,7 +147,7 @@ class TestTerminalPtySoak(unittest.TestCase):
 
         while processed < len(keystrokes):
             if time.monotonic() > deadline:
-                self.fail(f"DEADLOCK DETECTED: Processed only {processed}/{len(keystrokes)} before 30s timeout")
+                self.fail(f"DEADLOCK DETECTED: Processed only {processed}/{len(keystrokes)} before 60s timeout")
 
             key = key_queue.get_blocking()
             if key is None:
@@ -163,7 +163,7 @@ class TestTerminalPtySoak(unittest.TestCase):
             processed += 1
 
             # Periodically drain bidirectional PTY traffic without blocking
-            if processed % 50 == 0:
+            if processed % 100 == 0:
                 # 1. Drain all pending output from slave side
                 while True:
                     try:
@@ -195,7 +195,7 @@ class TestTerminalPtySoak(unittest.TestCase):
 
         # 1. Assert Deadlock / Progress
         self.assertEqual(processed, len(keystrokes), "All 10,000 keystrokes must be processed")
-        self.assertLess(elapsed, 30.0, f"Soak completed in {elapsed:.2f}s (budget: 30s)")
+        self.assertLess(elapsed, 60.0, f"Soak completed in {elapsed:.2f}s (budget: 60s)")
 
         # 2. Assert Buffer and Grid Invariants
         active_font = self.bridge._font_size

@@ -60,7 +60,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool
+          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool typer questionary
 
       - name: Execute Pytest Suite
         run: pytest -v
@@ -135,7 +135,7 @@ jobs:
       - name: Install acceptance dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool
+          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool typer questionary
 
       - name: Run Master Acceptance Test Runner
         run: python scripts/run_all_acceptance_tests.py
@@ -162,4 +162,5 @@ jobs:
       - name: Verify Firmware Release Manifest Dry-Run
         run: |
           pip install python-dotenv pyyaml esptool
+          truncate -s 4194304 cyd_factory_backup.bin
           python scripts/flash_cyd_display_link.py --dry-run
