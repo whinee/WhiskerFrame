@@ -8,10 +8,23 @@ Linux i2c-dev character device using only the Python standard library
 (``os`` + ``fcntl.ioctl`` with ``I2C_SLAVE``), so it runs inside the minimal
 uv-managed Pi venv with no external dependency.
 
-The device is strictly read-only: a key read is a single-byte I2C read, with no
-register writes. Configuration (bus, address, poll cadence) is sourced from the
-``cardkb:`` block of ``.whiskerframe.yaml`` by callers; this module's defaults
-match the live-verified hardware (``/dev/i2c-0`` @ ``0x5F``).
+CardKB I2C Firmware and Register Architecture at 0x5F:
+- Microcontroller: ATmega328P / ATmega8A firmware (M5Stack CardKeyBoard.ino).
+- Registers: None. The firmware does NOT expose memory-mapped configuration
+  registers, status registers, or non-volatile EEPROM storage for power-on LED state.
+- I2C Read Protocol: Slave returns a single byte containing the ASCII code of
+  the pending keystroke, or ``NO_KEY`` (``0x00``) when idle.
+- I2C Write Protocol: Accepts single-byte opcode ``0x11`` (`OPCODE_CLEAR_LED`)
+  to extinguish the onboard SK6812 NeoPixel, or 4-byte command ``0x13 [R, G, B]``
+  (`OPCODE_SET_LED`) to set its color.
+- Boot and Power-Cycle Invariant: Because stock firmware provides no persistent
+  register to default the NeoPixel to OFF across power cycles, `CardKB.open()`,
+  `CardKB.close()`, and `robust_keys()` (upon reconnect / bus recovery) explicitly
+  enforce the default-off invariant by dispatching opcode ``0x11``.
+
+Configuration (bus, address, poll cadence) is sourced from the ``cardkb:`` block
+of ``.whiskerframe.yaml`` by callers; this module's defaults match the
+live-verified hardware (``/dev/i2c-0`` @ ``0x5F``).
 """
 
 from __future__ import annotations
@@ -26,6 +39,8 @@ __all__ = [
     "DEBOUNCE_WINDOW_S",
     "I2C_SLAVE",
     "NO_KEY",
+    "OPCODE_CLEAR_LED",
+    "OPCODE_SET_LED",
     "VALID_BYTES",
     "CardKB",
     "CardKBError",
@@ -37,6 +52,12 @@ I2C_SLAVE: int = 0x0703
 
 NO_KEY: int = 0x00
 """Byte the CardKB returns when no key press is pending."""
+
+OPCODE_CLEAR_LED: int = 0x11
+"""CardKB I2C firmware command byte to clear/turn off the onboard SK6812 NeoPixel."""
+
+OPCODE_SET_LED: int = 0x13
+"""CardKB I2C firmware command byte to set the onboard SK6812 NeoPixel RGB color."""
 
 VALID_BYTES: frozenset[int] = frozenset(
     set(range(0x01, 0x20))  # C0 control bytes: Ctrl+letter, Tab(0x09), Enter(0x0D), Esc(0x1B), Backspace(0x08)
@@ -128,17 +149,25 @@ class CardKB:
 
     """
 
-    def __init__(self, bus: int = 0, address: int = 0x5F) -> None:
+    def __init__(
+        self,
+        bus: int = 0,
+        address: int = 0x5F,
+        default_led_off: bool = True,
+    ) -> None:
         r"""
         Initialize the reader for a bus and slave address (does not open it).
 
         Args:
         - bus (`int`, optional): I2C bus number for ``/dev/i2c-N``. Defaults to ``0``.
         - address (`int`, optional): 7-bit CardKB slave address. Defaults to ``0x5F``.
+        - default_led_off (`bool`, optional): Whether to ensure NeoPixel LED defaults
+          to OFF across boot and power cycles. Defaults to ``True``.
 
         """
         self.bus = bus
         self.address = address
+        self.default_led_off = default_led_off
         self._fd: int | None = None
 
     def __enter__(self) -> CardKB:
@@ -171,7 +200,13 @@ class CardKB:
 
     def open(self) -> None:
         r"""
-        Open the I2C device and bind it to the CardKB slave address.
+        Open the I2C device, bind it to the slave address, and ensure LED is OFF.
+
+        The stock CardKB firmware (ATmega328P/8A) has no persistent configuration
+        registers or EEPROM storage for default LED state at power-on. When
+        ``default_led_off`` is enabled, this method actively transmits opcode
+        ``0x11`` immediately after binding the slave address to guarantee the
+        onboard SK6812 NeoPixel is extinguished across boot and power cycles.
 
         Raises:
         - `CardKBError`: If the device cannot be opened or the address bound.
@@ -181,6 +216,8 @@ class CardKB:
         try:
             self._fd = os.open(device, os.O_RDWR)
             fcntl.ioctl(self._fd, I2C_SLAVE, self.address)
+            if self.default_led_off:
+                self.clear_led()
         except OSError as err:
             self.close()
             raise CardKBError(
@@ -189,17 +226,32 @@ class CardKB:
 
     def close(self) -> None:
         r"""
-        Close the I2C device if it is open.
+        Close the I2C device if it is open, ensuring NeoPixel is extinguished.
 
         Safe to call more than once; an already-closed descriptor is ignored.
 
         """
         if self._fd is not None:
+            if self.default_led_off:
+                self.clear_led()
             try:
                 os.close(self._fd)
             except OSError:
                 pass
             self._fd = None
+
+    def ensure_default_led_off(self) -> bool:
+        r"""
+        Ensure the CardKB onboard SK6812 NeoPixel is turned off.
+
+        Enforces the default-off invariant across boot and power cycles by
+        transmitting opcode ``0x11`` to slave address ``0x5F``.
+
+        Returns:
+        `bool`: ``True`` if transmitted successfully, ``False`` on error.
+
+        """
+        return self.clear_led()
 
     def read_key(self) -> int:
         r"""
@@ -227,8 +279,9 @@ class CardKB:
         r"""
         Set the CardKB onboard SK6812 NeoPixel RGB color.
 
-        CardKB firmware (receiveEvent) supports opcode ``0x13`` with 3 RGB byte
-        parameters: ``bytes([0x13, r, g, b])``. Fails silent on bus error.
+        CardKB firmware (receiveEvent) supports opcode ``0x13`` (`OPCODE_SET_LED`)
+        with 3 RGB byte parameters: ``bytes([0x13, r, g, b])``. Fails silent on bus
+        error.
 
         Args:
         - r (`int`): Red intensity (``0..255``).
@@ -242,7 +295,7 @@ class CardKB:
         if self._fd is None:
             return False
         try:
-            os.write(self._fd, bytes([0x13, r & 0xFF, g & 0xFF, b & 0xFF]))
+            os.write(self._fd, bytes([OPCODE_SET_LED, r & 0xFF, g & 0xFF, b & 0xFF]))
             return True
         except OSError:
             return False
@@ -251,7 +304,8 @@ class CardKB:
         r"""
         Turn off the CardKB onboard SK6812 NeoPixel.
 
-        CardKB firmware supports opcode ``0x11`` to clear the pixel.
+        CardKB firmware supports opcode ``0x11`` (`OPCODE_CLEAR_LED`) to clear
+        the pixel.
 
         Returns:
         `bool`: ``True`` if transmitted successfully, ``False`` on bus error.
@@ -260,7 +314,7 @@ class CardKB:
         if self._fd is None:
             return False
         try:
-            os.write(self._fd, bytes([0x11]))
+            os.write(self._fd, bytes([OPCODE_CLEAR_LED]))
             return True
         except OSError:
             return False
