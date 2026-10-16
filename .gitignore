@@ -485,3 +485,7 @@ assets/images/cess/*-composite.*
 assets/images/*-preview.*
 assets/images/goodbye*
 
+# Firmware distribution binaries
+!firmware/dist/
+!firmware/dist/**
+
