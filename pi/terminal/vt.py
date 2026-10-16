@@ -98,6 +98,12 @@ class VTEmulator:
         self._params: list[str] = []
         self._param_digits: list[str] = []
 
+    def set_grid(self, grid: Grid) -> None:
+        """
+        Migrate emulator to a new grid (e.g. after reflow/resize) while preserving state.
+        """
+        self.grid = grid
+
     def feed(self, data: bytes) -> None:
         """
         Feed a chunk of shell output bytes, mutating the grid.

@@ -720,12 +720,15 @@ class TerminalBridge:
             font_size=self._font_size,
             cols=self._geometry.cols,
         )
-        grid = Grid(
-            self._geometry.cols,
-            self._geometry.rows,
-            self._theme.fg,
-            self._theme.bg,
-        )
+        if hasattr(self, "_grid") and self._grid is not None:
+            grid = self._grid.reflow(self._geometry.cols, self._geometry.rows)
+        else:
+            grid = Grid(
+                self._geometry.cols,
+                self._geometry.rows,
+                self._theme.fg,
+                self._theme.bg,
+            )
         grid.dirty = True
         return grid
 
@@ -1088,7 +1091,10 @@ class _ShellSession:
     def _handle_resize_chord(self) -> bool:
         self._disarm_ctrl(repaint=False)
         self._grid = self._bridge._rebuild_geometry(self._master_fd)
-        self._emulator = VTEmulator(self._grid, self._bridge._theme)
+        if hasattr(self._emulator, "set_grid"):
+            self._emulator.set_grid(self._grid)
+        else:
+            self._emulator = VTEmulator(self._grid, self._bridge._theme)
         if hasattr(self, "_workspaces") and self._workspaces:
             self._workspaces.rebuild_geometry(self._bridge._geometry)
             if self._workspaces.active_workspace:

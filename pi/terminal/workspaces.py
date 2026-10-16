@@ -107,6 +107,22 @@ def _tiocswinsz(fd: int, geometry: TerminalGeometry) -> None:
         pass
 
 
+def _get_socket_peer_user(sock: socket.socket | None) -> str | None:
+    """Extract authenticated peer username from UNIX domain socket via SO_PEERCRED."""
+    if sock is None:
+        return None
+    try:
+        import pwd
+
+        # SO_PEERCRED on Linux returns struct ucred { pid_t pid; uid_t uid; gid_t gid; }
+        so_peercred = getattr(socket, "SO_PEERCRED", 17)
+        cred = sock.getsockopt(socket.SOL_SOCKET, so_peercred, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", cred)
+        return pwd.getpwuid(uid).pw_name
+    except (OSError, KeyError, ImportError, struct.error):
+        return None
+
+
 class WorkspaceLimitError(RuntimeError):
     """Raised when attempting to exceed bounded workspace capacity."""
 
@@ -223,7 +239,11 @@ class WorkspaceManager:
     def _default_spawn(user: str) -> tuple[int, int]:
         pid, master_fd = pty.fork()
         if pid == 0:  # pragma: no cover
-            os.execvp("bash", ["bash", "-l"])  # noqa: S606, S607
+            current_user = os.environ.get("USER", "")
+            if user and user != current_user and os.geteuid() == 0:
+                os.execvp("su", ["su", "-", user])
+            else:
+                os.execvp("bash", ["bash", "-l"])  # noqa: S606, S607
             os._exit(127)
         return pid, master_fd
 
@@ -262,18 +282,32 @@ class WorkspaceManager:
         user: str | None = None,
         initial_fd: int | None = None,
         initial_pid: int | None = None,
+        caller_user: str | None = None,
     ) -> Workspace:
-        """Create a new independent workspace."""
+        """Create a new independent workspace with role authorization."""
         if len(self.workspaces) >= self.max_workspaces:
             raise WorkspaceLimitError(
                 f"Maximum workspace count ({self.max_workspaces}) reached",
             )
 
+        acting_user = caller_user or self.user
+        target_user = user or acting_user
+
+        # Role authorization check: non-root users cannot create workspaces for other users
+        if acting_user != "root" and target_user != acting_user:
+            raise PermissionError(
+                f"User '{acting_user}' is not authorized to create workspace for '{target_user}'",
+            )
+
         target_id = self._alloc_target_id(ws_id)
         if target_id in self.workspaces:
-            return self.workspaces[target_id]
+            existing = self.workspaces[target_id]
+            if acting_user != "root" and existing.user != acting_user:
+                raise PermissionError(
+                    f"User '{acting_user}' cannot access workspace {target_id} owned by '{existing.user}'",
+                )
+            return existing
 
-        target_user = user or self.user
         if initial_fd is not None and initial_pid is not None:
             pid, master_fd = initial_pid, initial_fd
         else:
@@ -299,18 +333,34 @@ class WorkspaceManager:
         tracepoint("workspace.created", id=target_id, pid=pid, user=target_user)
         return ws
 
-    def switch_workspace(self, target_id: int) -> bool:
+    def switch_workspace(self, target_id: int, user: str | None = None) -> bool:
         """Switch active workspace, restoring screen cleanly without resetting shells."""
-        if target_id == self.active_id and target_id in self.workspaces:
+        acting_user = user or self.user
+        if target_id in self.workspaces:
+            ws = self.workspaces[target_id]
+            # Role authorization check: non-root cannot switch to other user's workspace
+            if acting_user != "root" and ws.user != acting_user:
+                return False
+
+            if target_id == self.active_id:
+                return True
+
+            self.active_id = target_id
+            ws.last_active = time.monotonic()
+            tracepoint("workspace.switch", id=target_id)
+            self.restore_screen()
             return True
 
-        if target_id not in self.workspaces:
-            if target_id > self.max_workspaces:
-                return False
-            try:
-                self.create_workspace(ws_id=target_id)
-            except WorkspaceLimitError:
-                return False
+        if target_id > self.max_workspaces:
+            return False
+        try:
+            self.create_workspace(
+                ws_id=target_id,
+                user=acting_user,
+                caller_user=acting_user,
+            )
+        except (WorkspaceLimitError, PermissionError):
+            return False
 
         self.active_id = target_id
         ws = self.workspaces[target_id]
@@ -319,36 +369,69 @@ class WorkspaceManager:
         self.restore_screen()
         return True
 
-    def next_workspace(self) -> int:
-        """Switch to next active workspace (wrapping around)."""
+    def next_workspace(self, user: str | None = None) -> int:
+        """Switch to next active workspace belonging to user (wrapping around)."""
+        acting_user = user or self.user
         if not self.workspaces:
             return self.active_id
-        sorted_ids = sorted(self.workspaces.keys())
-        if self.active_id not in sorted_ids:
-            next_id = sorted_ids[0]
+
+        if acting_user == "root":
+            candidate_ids = sorted(self.workspaces.keys())
         else:
-            idx = (sorted_ids.index(self.active_id) + 1) % len(sorted_ids)
-            next_id = sorted_ids[idx]
-        self.switch_workspace(next_id)
+            candidate_ids = sorted([
+                ws_id for ws_id, ws in self.workspaces.items()
+                if ws.user == acting_user
+            ])
+
+        if not candidate_ids:
+            return self.active_id
+
+        if self.active_id not in candidate_ids:
+            next_id = candidate_ids[0]
+        else:
+            idx = (candidate_ids.index(self.active_id) + 1) % len(candidate_ids)
+            next_id = candidate_ids[idx]
+        self.switch_workspace(next_id, user=acting_user)
         return next_id
 
-    def prev_workspace(self) -> int:
-        """Switch to previous active workspace (wrapping around)."""
+    def prev_workspace(self, user: str | None = None) -> int:
+        """Switch to previous active workspace belonging to user (wrapping around)."""
+        acting_user = user or self.user
         if not self.workspaces:
             return self.active_id
-        sorted_ids = sorted(self.workspaces.keys())
-        if self.active_id not in sorted_ids:
-            prev_id = sorted_ids[-1]
+
+        if acting_user == "root":
+            candidate_ids = sorted(self.workspaces.keys())
         else:
-            idx = (sorted_ids.index(self.active_id) - 1) % len(sorted_ids)
-            prev_id = sorted_ids[idx]
-        self.switch_workspace(prev_id)
+            candidate_ids = sorted([
+                ws_id for ws_id, ws in self.workspaces.items()
+                if ws.user == acting_user
+            ])
+
+        if not candidate_ids:
+            return self.active_id
+
+        if self.active_id not in candidate_ids:
+            prev_id = candidate_ids[-1]
+        else:
+            idx = (candidate_ids.index(self.active_id) - 1) % len(candidate_ids)
+            prev_id = candidate_ids[idx]
+        self.switch_workspace(prev_id, user=acting_user)
         return prev_id
 
-    def close_workspace(self, target_id: int | None = None) -> bool:
+    def close_workspace(
+        self,
+        target_id: int | None = None,
+        user: str | None = None,
+    ) -> bool:
         """Close specified workspace (or active if None), reaping its process."""
+        acting_user = user or self.user
         ws_id = target_id if target_id is not None else self.active_id
         if ws_id not in self.workspaces:
+            return False
+
+        ws = self.workspaces[ws_id]
+        if acting_user != "root" and ws.user != acting_user:
             return False
 
         ws = self.workspaces.pop(ws_id)
@@ -356,9 +439,15 @@ class WorkspaceManager:
         tracepoint("workspace.closed", id=ws_id)
 
         if self.active_id == ws_id:
-            if self.workspaces:
-                sorted_ids = sorted(self.workspaces.keys())
-                self.active_id = min(sorted_ids, key=lambda x: abs(x - ws_id))
+            remaining = [
+                k for k, w in self.workspaces.items()
+                if acting_user == "root" or w.user == acting_user
+            ]
+            if remaining:
+                self.active_id = min(remaining, key=lambda x: abs(x - ws_id))
+                self.restore_screen()
+            elif self.workspaces and acting_user == "root":
+                self.active_id = min(self.workspaces.keys(), key=lambda x: abs(x - ws_id))
                 self.restore_screen()
             else:
                 self.active_id = 0
@@ -425,7 +514,7 @@ class WorkspaceManager:
                     new_grid.put_char(cell.char, cell.fg, cell.bg)
 
     def rebuild_geometry(self, geometry: TerminalGeometry) -> None:
-        """Update window geometry across all workspaces and redraw active."""
+        """Update window geometry across all workspaces with true reflow and redraw active."""
         theme = getattr(self.bridge, "_theme", None)
         fg = theme.fg if theme else 0xFFFF
         bg = theme.bg if theme else 0x0000
@@ -433,30 +522,35 @@ class WorkspaceManager:
         for ws in self.workspaces.values():
             if ws.master_fd >= 0:
                 _tiocswinsz(ws.master_fd, geometry)
-            new_grid = Grid(geometry.cols, geometry.rows, fg, bg)
-            self._copy_cells(ws.grid, new_grid)
-            new_grid.set_cursor(
-                min(ws.grid.cursor_row, geometry.rows - 1),
-                min(ws.grid.cursor_col, geometry.cols - 1),
-            )
+            new_grid = ws.grid.reflow(geometry.cols, geometry.rows)
             ws.grid = new_grid
-            ws.emulator = VTEmulator(new_grid, theme)
+            if hasattr(ws.emulator, "set_grid"):
+                ws.emulator.set_grid(new_grid)
+            else:
+                ws.emulator = VTEmulator(new_grid, theme)
+        if hasattr(self.bridge, "_clear_panel"):
+            self.bridge._clear_panel()
         self.restore_screen()
 
-    def list_workspaces(self) -> list[dict[str, Any]]:
-        """Return serializable summary of all workspaces."""
-        return [
-            {
-                "id": ws.id,
-                "name": ws.name,
-                "user": ws.user,
-                "pid": ws.pid,
-                "active": ws.id == self.active_id,
-                "cwd": ws.cwd,
-                "alive": ws.is_alive(),
-            }
-            for ws in sorted(self.workspaces.values(), key=lambda w: w.id)
-        ]
+    def list_workspaces(self, user: str | None = None) -> list[dict[str, Any]]:
+        """Return serializable summary of authorized workspaces."""
+        acting_user = user if user is not None else self.user
+        visible = []
+        for ws in sorted(self.workspaces.values(), key=lambda w: w.id):
+            if acting_user != "root" and ws.user != acting_user:
+                continue
+            visible.append(
+                {
+                    "id": ws.id,
+                    "name": ws.name,
+                    "user": ws.user,
+                    "pid": ws.pid,
+                    "active": ws.id == self.active_id,
+                    "cwd": ws.cwd,
+                    "alive": ws.is_alive(),
+                },
+            )
+        return visible
 
     def close_all(self) -> None:
         """Close all managed workspaces and IPC server."""
@@ -481,6 +575,10 @@ class WorkspaceManager:
                     sock_path.unlink()
                 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 srv.bind(str(sock_path))
+                try:
+                    os.chmod(str(sock_path), 0o666)
+                except OSError:
+                    pass
                 srv.listen(5)
                 srv.setblocking(False)
                 self._ipc_server = srv
@@ -556,7 +654,7 @@ class WorkspaceManager:
             resp = {"ok": False, "error": "Invalid JSON request"}
             client.sendall(json.dumps(resp).encode("utf-8") + b"\n")
             return
-        resp = self.dispatch_ipc_command(req)
+        resp = self.dispatch_ipc_command(req, client=client)
         client.sendall(json.dumps(resp).encode("utf-8") + b"\n")
 
     def _read_client(self, client: socket.socket) -> None:
@@ -579,15 +677,19 @@ class WorkspaceManager:
         if client in self._ipc_clients:
             self._ipc_clients.remove(client)
 
-    def _cmd_list(self, _req: dict[str, Any]) -> dict[str, Any]:
+    def _cmd_list(self, _req: dict[str, Any], user: str) -> dict[str, Any]:
+        workspaces = self.list_workspaces(user=user)
+        active_id = self.active_id
+        if user != "root" and not any(w["id"] == active_id for w in workspaces):
+            active_id = workspaces[0]["id"] if workspaces else 0
         return {
             "ok": True,
-            "workspaces": self.list_workspaces(),
-            "active": self.active_id,
+            "workspaces": workspaces,
+            "active": active_id,
             "max": self.max_workspaces,
         }
 
-    def _cmd_switch(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _cmd_switch(self, req: dict[str, Any], user: str) -> dict[str, Any]:
         target_id = req.get("id")
         if target_id is None:
             return {"ok": False, "error": "Missing workspace id"}
@@ -595,48 +697,108 @@ class WorkspaceManager:
             tid = int(target_id)
         except (ValueError, TypeError):
             return {"ok": False, "error": f"Invalid id: {target_id}"}
-        ok = self.switch_workspace(tid)
-        return {"ok": ok, "active": self.active_id}
+        ws = self.workspaces.get(tid)
+        if ws and user != "root" and ws.user != user:
+            return {
+                "ok": False,
+                "error": f"Permission denied: cannot switch to workspace {tid} owned by '{ws.user}'",
+            }
+        ok = self.switch_workspace(tid, user=user)
+        if not ok:
+            return {"ok": False, "error": f"Could not switch to workspace {tid}"}
+        return {"ok": True, "active": self.active_id}
 
-    def _cmd_new(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _cmd_new(self, req: dict[str, Any], user: str) -> dict[str, Any]:
         name = req.get("name")
         target_id = req.get("id")
         tid = int(target_id) if target_id is not None else None
+        req_target = req.get("user")
+        if user != "root" and req_target and req_target != user:
+            return {
+                "ok": False,
+                "error": f"Permission denied: user '{user}' cannot create workspace for '{req_target}'",
+            }
         try:
-            ws = self.create_workspace(ws_id=tid, name=name)
+            ws = self.create_workspace(
+                ws_id=tid,
+                name=name,
+                user=user,
+                caller_user=user,
+            )
             return {"ok": True, "id": ws.id, "active": self.active_id}
-        except WorkspaceLimitError as err:
+        except (WorkspaceLimitError, PermissionError) as err:
             return {"ok": False, "error": str(err)}
 
-    def _cmd_close(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _cmd_close(self, req: dict[str, Any], user: str) -> dict[str, Any]:
         target_id = req.get("id")
         tid = int(target_id) if target_id is not None else self.active_id
-        return {"ok": self.close_workspace(tid), "active": self.active_id}
+        ws = self.workspaces.get(tid)
+        if ws and user != "root" and ws.user != user:
+            return {
+                "ok": False,
+                "error": f"Permission denied: cannot close workspace {tid} owned by '{ws.user}'",
+            }
+        ok = self.close_workspace(tid, user=user)
+        if not ok:
+            return {"ok": False, "error": f"Could not close workspace {tid}"}
+        return {"ok": True, "active": self.active_id}
 
-    def _cmd_status(self, _req: dict[str, Any]) -> dict[str, Any]:
+    def _cmd_status(self, _req: dict[str, Any], user: str) -> dict[str, Any]:
+        workspaces = self.list_workspaces(user=user)
+        active_id = self.active_id
+        if user != "root" and not any(w["id"] == active_id for w in workspaces):
+            active_id = workspaces[0]["id"] if workspaces else 0
         return {
             "ok": True,
-            "active": self.active_id,
-            "count": len(self.workspaces),
+            "active": active_id,
+            "count": len(workspaces),
             "max": self.max_workspaces,
-            "workspaces": self.list_workspaces(),
+            "workspaces": workspaces,
         }
 
-    def dispatch_ipc_command(self, req: dict[str, Any]) -> dict[str, Any]:
-        """Dispatch a single parsed IPC command dictionary."""
+    def dispatch_ipc_command(
+        self,
+        req: dict[str, Any],
+        client: socket.socket | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch a single parsed IPC command dictionary with role authorization."""
+        peer_user = _get_socket_peer_user(client)
+        req_user = req.get("user")
+
+        try:
+            import pwd
+
+            current_proc_user = pwd.getpwuid(os.geteuid()).pw_name
+        except Exception:
+            current_proc_user = None
+
+        if peer_user is not None and peer_user != "root" and peer_user != current_proc_user:
+            if req_user and req_user != peer_user:
+                return {
+                    "ok": False,
+                    "error": f"Permission denied: user '{peer_user}' cannot impersonate '{req_user}'",
+                }
+            effective_user = peer_user
+        else:
+            effective_user = req_user or self.user
+
         cmd = req.get("cmd", "").lower()
-        handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+        handlers: dict[str, Callable[[dict[str, Any], str], dict[str, Any]]] = {
             "list": self._cmd_list,
             "ls": self._cmd_list,
             "switch": self._cmd_switch,
             "goto": self._cmd_switch,
-            "next": lambda _r: {"ok": True, "active": self.next_workspace()},
-            "prev": lambda _r: {"ok": True, "active": self.prev_workspace()},
+            "next": lambda _r, u: {"ok": True, "active": self.next_workspace(user=u)},
+            "prev": lambda _r, u: {"ok": True, "active": self.prev_workspace(user=u)},
             "new": self._cmd_new,
             "close": self._cmd_close,
             "kill": self._cmd_close,
             "status": self._cmd_status,
         }
+        handler = handlers.get(cmd)
+        if handler is None:
+            return {"ok": False, "error": f"Unknown command: {cmd}"}
+        return handler(req, effective_user)
         handler = handlers.get(cmd)
         if handler is None:
             return {"ok": False, "error": f"Unknown command: {cmd}"}
@@ -672,8 +834,13 @@ class WorkspaceManager:
 class WorkspaceClient:
     """Client for controlling Whiskerframe workspaces over UNIX domain socket."""
 
-    def __init__(self, socket_path: str | None = None) -> None:
+    def __init__(
+        self,
+        socket_path: str | None = None,
+        user: str | None = None,
+    ) -> None:
         self.socket_path = socket_path
+        self.user = user
 
     def _connect(self) -> socket.socket:
         paths = [self.socket_path, DEFAULT_SOCKET_PATH, FALLBACK_SOCKET_PATH]
@@ -693,8 +860,11 @@ class WorkspaceClient:
 
     def send_cmd(self, req: dict[str, Any]) -> dict[str, Any]:
         """Send command dict and return parsed JSON reply."""
+        payload_dict = dict(req)
+        if self.user and "user" not in payload_dict:
+            payload_dict["user"] = self.user
         with self._connect() as s:
-            payload = json.dumps(req).encode("utf-8") + b"\n"
+            payload = json.dumps(payload_dict).encode("utf-8") + b"\n"
             s.sendall(payload)
             s.settimeout(2.0)
             data = b""
@@ -707,30 +877,58 @@ class WorkspaceClient:
                 return {"ok": False, "error": "No response received"}
             return json.loads(data.decode("utf-8").strip())
 
-    def list(self) -> dict[str, Any]:
+    def list(self, user: str | None = None) -> dict[str, Any]:
         """List active workspaces."""
-        return self.send_cmd({"cmd": "list"})
+        cmd: dict[str, Any] = {"cmd": "list"}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def switch(self, ws_id: int) -> dict[str, Any]:
+    def switch(self, ws_id: int, user: str | None = None) -> dict[str, Any]:
         """Switch to workspace ws_id."""
-        return self.send_cmd({"cmd": "switch", "id": ws_id})
+        cmd: dict[str, Any] = {"cmd": "switch", "id": ws_id}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def next(self) -> dict[str, Any]:
+    def next(self, user: str | None = None) -> dict[str, Any]:
         """Switch to next workspace."""
-        return self.send_cmd({"cmd": "next"})
+        cmd: dict[str, Any] = {"cmd": "next"}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def prev(self) -> dict[str, Any]:
+    def prev(self, user: str | None = None) -> dict[str, Any]:
         """Switch to previous workspace."""
-        return self.send_cmd({"cmd": "prev"})
+        cmd: dict[str, Any] = {"cmd": "prev"}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def new(self, name: str | None = None) -> dict[str, Any]:
+    def new(self, name: str | None = None, user: str | None = None) -> dict[str, Any]:
         """Create new workspace."""
-        return self.send_cmd({"cmd": "new", "name": name})
+        cmd: dict[str, Any] = {"cmd": "new", "name": name}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def close(self, ws_id: int | None = None) -> dict[str, Any]:
+    def close(self, ws_id: int | None = None, user: str | None = None) -> dict[str, Any]:
         """Close workspace."""
-        return self.send_cmd({"cmd": "close", "id": ws_id})
+        cmd: dict[str, Any] = {"cmd": "close", "id": ws_id}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
 
-    def status(self) -> dict[str, Any]:
+    def status(self, user: str | None = None) -> dict[str, Any]:
         """Get workspace status."""
-        return self.send_cmd({"cmd": "status"})
+        cmd: dict[str, Any] = {"cmd": "status"}
+        effective = user or self.user
+        if effective:
+            cmd["user"] = effective
+        return self.send_cmd(cmd)
