@@ -3,14 +3,14 @@
 # Whiskerframe Cyberdeck Demo Utility
 
 clear
-echo "================================================================"
-echo "          🐾 Whiskerframe Cyberdeck v0.1 Demo Sandbox 🐾        "
-echo "================================================================"
+echo "====================================================="
+echo "       Whiskerframe Cyberdeck v0.1 Demo Sandbox      "
+echo "====================================================="
 echo ""
-echo "Welcome, guest! You are running in a restricted kernel sandbox:"
-echo " - Network: 100% Isolated (all egress dropped via nftables)"
+echo "Welcome, guest! Restricted kernel sandbox:"
+echo " - Network: 100% Isolated (nftables egress drop)"
 echo " - Memory: 64MB Cgroup Slice | CPU Quota: 50%"
-echo " - Execution Limit: 5 seconds max per subprocess (Process Reaper)"
+echo " - Execution Limit: 5s max / process (Reaper)"
 echo " - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)"
 echo ""
 echo "--- Live Deck Telemetry ---"
@@ -30,4 +30,4 @@ fi
 echo "Memory Available: $(free -h | awk '/Mem:/ {print $7}')"
 echo ""
 echo "Try running safe commands, or type 'exit' to log out."
-echo "================================================================"
+echo "====================================================="
