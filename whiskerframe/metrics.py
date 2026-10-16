@@ -59,6 +59,7 @@ FONT_METRICS: dict[int, FontMetrics] = {
     2: FontMetrics(cell_width=12, cell_height=16, line_advance=16),
     3: FontMetrics(cell_width=18, cell_height=24, line_advance=24),
     4: FontMetrics(cell_width=24, cell_height=32, line_advance=32),
+    5: FontMetrics(cell_width=8, cell_height=12, line_advance=12),
 }
 """Static per-``font_size`` metrics table (pure data, no Pillow).
 
