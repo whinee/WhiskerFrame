@@ -919,15 +919,12 @@ INTENT: [2026-10-16T00:00Z] Orchestration Wave 2 — Pre-Demo Hardening & Resili
 9. WS-I: Review Wi-Fi/network docs, prepare NetBird role, script TSK-05 dry-run with rescue timer.
 10. WS-J: Validate spec-interview-guard, run gitleaks over outgoing range.
 
-
-
-
-
-
-
-
-
-
-
-
-
+RESULT: [2026-10-16T01:10Z] Full-Throttle Hardening Wave Completed:
+1. **WS-C (Firmware Attended Flash & Hardware Sleep):** Full 4MB SPI flash backed up to `/mnt/250GB-SSD/backup/cyd/cyd_current_backup_20261016.bin` (SHA256: `97ab1787466edf67d834841a00bb07af89bd32833d40358989dd88c3a7a08837`). Flashed PlatformIO build `firmware_20261016.bin` to `0x10000` at 230,400 baud. Zero boot panics. Live serial sleep/wake tested on physical CYD panel.
+2. **WS-D (Reliability & Fault-Injection):** Authored `scripts/reliability/` (10k PTY soak test, 50-cycle PAM login loop, sticky Ctrl latch property tests, serial drop/reconnect tests, net-heal drill). 57/57 unit and property tests passing in 17s.
+3. **WS-E (Stage Manual & Demo Polish):** Authored `docs/dev/demo-day.md` (3-minute dialogue script, 53-col printable CardKB cheat sheet, Failure Playbooks A-F, gear checklist, diagnostic flowchart). Interactive demo utility `pi/bin/demo` and font 5 (8x12, 40x20 grid) wired into `RESIZE_SIZES`.
+4. **WS-F (Supervised Golden Backup):** Transferred `SHA256SUMS`, `boot-firmware.tar.gz`, `mmcblk0-partition-table.sfdisk` to dev host (`/home/lyra/backups/cyberdeck-pi/`); verified sha256. Staged 570MB of `sdcard-mmcblk0.img.zst` with `--partial`; thermally paused when Pi hit 72.5°C to protect hardware.
+5. **WS-G (Offline Documentation):** Installed `python3-doc` and `w3m` on Pi; verified `wiki ls`, `wiki echo`, `wiki math` <=53 cols; Kiwix staged for off-line laptop sync.
+6. **WS-H (Triad Specification Alignment):** Refactored `product-requirements.md` (tagged `[v0]`, `[v1]`, `[v2+]`), `architecture.md` (bus hierarchy, memory ceilings, physics calculations), and wire protocol opcode `0x06`.
+7. **WS-I (Network UX & NetBird Staging):** Hardened `pi/bin/wifi` (captive portal detection, 802.1X guidance); authored `docs/dev/network-access.md`; created modular `ansible/roles/netbird/` and safe runner `scripts/apply-tsk05-safely.sh`.
+8. **WS-J (Hygiene & Zero-Leaks):** `docs/dev/spec-interview/0.md` pristine and untouched; `gitleaks` clean across entire commit history and uncommitted diff.
