@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import threading
 import time
 from collections.abc import Iterator
 from types import TracebackType
@@ -169,6 +170,7 @@ class CardKB:
         self.address = address
         self.default_led_off = default_led_off
         self._fd: int | None = None
+        self._lock = threading.RLock()
 
     def __enter__(self) -> CardKB:
         r"""
@@ -212,17 +214,18 @@ class CardKB:
         - `CardKBError`: If the device cannot be opened or the address bound.
 
         """
-        device = f"/dev/i2c-{self.bus}"
-        try:
-            self._fd = os.open(device, os.O_RDWR)
-            fcntl.ioctl(self._fd, I2C_SLAVE, self.address)
-            if self.default_led_off:
-                self.clear_led()
-        except OSError as err:
-            self.close()
-            raise CardKBError(
-                f"cannot open {device} @ {self.address:#04x}: {err}",
-            ) from err
+        with self._lock:
+            device = f"/dev/i2c-{self.bus}"
+            try:
+                self._fd = os.open(device, os.O_RDWR)
+                fcntl.ioctl(self._fd, I2C_SLAVE, self.address)
+                if self.default_led_off:
+                    self.clear_led()
+            except OSError as err:
+                self.close()
+                raise CardKBError(
+                    f"cannot open {device} @ {self.address:#04x}: {err}",
+                ) from err
 
     def close(self) -> None:
         r"""
@@ -231,14 +234,15 @@ class CardKB:
         Safe to call more than once; an already-closed descriptor is ignored.
 
         """
-        if self._fd is not None:
-            if self.default_led_off:
-                self.clear_led()
-            try:
-                os.close(self._fd)
-            except OSError:
-                pass
-            self._fd = None
+        with self._lock:
+            if self._fd is not None:
+                if self.default_led_off:
+                    self.clear_led()
+                try:
+                    os.close(self._fd)
+                except OSError:
+                    pass
+                self._fd = None
 
     def ensure_default_led_off(self) -> bool:
         r"""
@@ -251,7 +255,8 @@ class CardKB:
         `bool`: ``True`` if transmitted successfully, ``False`` on error.
 
         """
-        return self.clear_led()
+        with self._lock:
+            return self.clear_led()
 
     def read_key(self) -> int:
         r"""
@@ -267,13 +272,14 @@ class CardKB:
         `int`: The key byte in ``0..255`` (``0`` means no key).
 
         """
-        if self._fd is None:
-            raise CardKBError("CardKB device is not open; call open() first")
-        try:
-            data = os.read(self._fd, 1)
-        except OSError as err:
-            raise CardKBError(f"read failed: {err}") from err
-        return data[0] if data else NO_KEY
+        with self._lock:
+            if self._fd is None:
+                raise CardKBError("CardKB device is not open; call open() first")
+            try:
+                data = os.read(self._fd, 1)
+            except OSError as err:
+                raise CardKBError(f"read failed: {err}") from err
+            return data[0] if data else NO_KEY
 
     def set_led(self, r: int, g: int, b: int) -> bool:
         r"""
@@ -292,13 +298,14 @@ class CardKB:
         `bool`: ``True`` if transmitted successfully, ``False`` on bus error.
 
         """
-        if self._fd is None:
-            return False
-        try:
-            os.write(self._fd, bytes([OPCODE_SET_LED, r & 0xFF, g & 0xFF, b & 0xFF]))
-            return True
-        except OSError:
-            return False
+        with self._lock:
+            if self._fd is None:
+                return False
+            try:
+                os.write(self._fd, bytes([OPCODE_SET_LED, r & 0xFF, g & 0xFF, b & 0xFF]))
+                return True
+            except OSError:
+                return False
 
     def clear_led(self) -> bool:
         r"""
@@ -311,13 +318,14 @@ class CardKB:
         `bool`: ``True`` if transmitted successfully, ``False`` on bus error.
 
         """
-        if self._fd is None:
-            return False
-        try:
-            os.write(self._fd, bytes([OPCODE_CLEAR_LED]))
-            return True
-        except OSError:
-            return False
+        with self._lock:
+            if self._fd is None:
+                return False
+            try:
+                os.write(self._fd, bytes([OPCODE_CLEAR_LED]))
+                return True
+            except OSError:
+                return False
 
     def keys(self, poll_interval_s: float = 0.05) -> Iterator[int]:
         r"""

@@ -197,6 +197,47 @@ class TestCardKBI2CFirmwareRegistersAndDefaultOff(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(clear_calls), 2)
 
+    def test_cardkb_thread_lock_initialized(self) -> None:
+        """CardKB initializes a thread RLock to serialize concurrent I2C access."""
+        import threading
+        kb = CardKB()
+        self.assertTrue(hasattr(kb, "_lock"))
+        self.assertIsInstance(kb._lock, type(threading.RLock()))
+
+    @patch("cardkb.reader.os.write")
+    @patch("cardkb.reader.os.read")
+    def test_cardkb_concurrent_read_and_set_led_thread_safety(
+        self,
+        mock_read: MagicMock,
+        mock_write: MagicMock,
+    ) -> None:
+        """Concurrent read_key and set_led calls from separate threads are serialized."""
+        import concurrent.futures
+        mock_read.return_value = b"x"
+        mock_write.return_value = 4
+        kb = CardKB()
+        kb._fd = 50
+
+        # Concurrently fire 50 read_key and 50 set_led operations
+        def do_read() -> int:
+            return kb.read_key()
+
+        def do_led(idx: int) -> bool:
+            return kb.set_led(idx, 200, 0)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            read_futures = [executor.submit(do_read) for _ in range(50)]
+            led_futures = [executor.submit(do_led, i) for i in range(50)]
+            read_results = [f.result() for f in read_futures]
+            led_results = [f.result() for f in led_futures]
+
+        self.assertEqual(len(read_results), 50)
+        self.assertTrue(all(r == ord("x") for r in read_results))
+        self.assertEqual(len(led_results), 50)
+        self.assertTrue(all(led_results))
+        self.assertEqual(mock_read.call_count, 50)
+        self.assertEqual(mock_write.call_count, 50)
+
 
 class TestCtrlLatchFeedbackAndIndicatorRecolor(unittest.TestCase):
     """Test sticky Ctrl latch yellow cursor recoloring, key translation, and reset."""

@@ -114,6 +114,66 @@ class TerminalGeometry(NamedTuple):
             cell_h=metrics.cell_height,
         )
 
+    def viewport_geometry(self, status_bar_rows: int = 1) -> TerminalGeometry:
+        """
+        Derive the constrained viewport geometry excluding the status bar.
+
+        Args:
+        - status_bar_rows (`int`): Number of rows allocated to the status bar.
+          Defaults to 1.
+
+        Returns:
+        `TerminalGeometry`: The constrained geometry for the terminal viewport.
+        """
+        clamped_rows = max(1, self.rows - max(0, status_bar_rows))
+        return TerminalGeometry(
+            cols=self.cols,
+            rows=clamped_rows,
+            cell_w=self.cell_w,
+            cell_h=self.cell_h,
+        )
+
+    def status_bar_region(
+        self,
+        position: str = "top",
+        rows: int = 1,
+    ) -> tuple[int, int]:
+        """
+        Return the 0-indexed (start_row, height) allocated to the status bar.
+
+        Args:
+        - position (`str`): "top" or "bottom". Defaults to "top".
+        - rows (`int`): Status bar row height. Defaults to 1.
+
+        Returns:
+        `tuple[int, int]`: (start_row, height) on the character grid.
+        """
+        h = max(0, min(rows, self.rows))
+        if position.lower() == "bottom":
+            return (self.rows - h, h)
+        return (0, h)
+
+    def viewport_region(
+        self,
+        position: str = "top",
+        status_bar_rows: int = 1,
+    ) -> tuple[int, int]:
+        """
+        Return the 0-indexed (start_row, height) allocated to the terminal viewport.
+
+        Args:
+        - position (`str`): Status bar position ("top" or "bottom"). Defaults to "top".
+        - status_bar_rows (`int`): Number of rows allocated to status bar. Defaults to 1.
+
+        Returns:
+        `tuple[int, int]`: (start_row, height) on the character grid.
+        """
+        sb_h = max(0, min(status_bar_rows, self.rows))
+        vp_h = max(1, self.rows - sb_h)
+        if position.lower() == "top" and sb_h > 0:
+            return (sb_h, vp_h)
+        return (0, vp_h)
+
 
 class DrawCells(BaseModel):
     """
