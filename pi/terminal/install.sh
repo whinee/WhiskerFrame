@@ -35,7 +35,52 @@ fi
 echo "Installing ${UNIT_DST} ..."
 install -m 0644 "${UNIT_SRC}" "${UNIT_DST}"
 
-# 2. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
+# 2. System-wide short shell prompt (r# for root, n$ for neko).
+echo "Configuring short CYD shell prompt in /etc/profile.d/cyd_prompt.sh ..."
+cat << 'EOF' > /etc/profile.d/cyd_prompt.sh
+if [ "$USER" = "root" ]; then
+    export PS1='r# '
+elif [ "$USER" = "neko" ]; then
+    export PS1='n$ '
+else
+    export PS1='${USER:0:1}\$ '
+fi
+EOF
+chmod 0644 /etc/profile.d/cyd_prompt.sh
+
+for u_home in "/root" "/home/neko"; do
+    if [ -d "$u_home" ]; then
+        user_name="$(basename "$u_home")"
+        [ "$user_name" = "root" ] && p_str="r# " || p_str="${user_name:0:1}\$ "
+        bashrc_file="${u_home}/.bashrc"
+        if [ -f "$bashrc_file" ]; then
+            grep -q "CYD_SHORT_PROMPT" "$bashrc_file" || echo "export PS1='${p_str}' # CYD_SHORT_PROMPT" >> "$bashrc_file"
+        fi
+    fi
+done
+
+# 3. Guest PAM login autostart & CLI helpers
+echo "Configuring guest demo autostart in /etc/profile.d/guest-demo.sh ..."
+cat << 'EOF' > /etc/profile.d/guest-demo.sh
+if [ "${USER:-$(id -un 2>/dev/null)}" = "guest" ] && [ -n "$PS1" ]; then
+    if [ -x /usr/local/bin/wf ]; then
+        /usr/local/bin/wf demo
+    elif [ -x /usr/local/bin/demo ]; then
+        /usr/local/bin/demo
+    elif [ -x /opt/cyd-display-link/pi/bin/demo ]; then
+        /opt/cyd-display-link/pi/bin/demo
+    fi
+fi
+EOF
+chmod 0755 /etc/profile.d/guest-demo.sh
+
+# Symlink CLI utilities to /usr/local/bin
+[ -f "${HERE}/../bin/wf" ] && ln -sf "${HERE}/../bin/wf" /usr/local/bin/wf || true
+[ -f "${HERE}/../bin/workspace" ] && ln -sf "${HERE}/../bin/workspace" /usr/local/bin/workspace || true
+[ -f "${HERE}/../bin/demo" ] && ln -sf "${HERE}/../bin/demo" /usr/local/bin/demo || true
+[ -f "${HERE}/../bin/wifi" ] && ln -sf "${HERE}/../bin/wifi" /usr/local/bin/wifi || true
+
+# 4. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
 echo "Reloading systemd and starting the service ..."
 systemctl daemon-reload
 systemctl enable terminal.service

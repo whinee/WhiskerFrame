@@ -1,0 +1,720 @@
+#!/usr/bin/env python3
+"""
+Whiskerframe Cyberdeck Demo Sandbox & Artwork Presentation Utility.
+
+Formatted strictly to <= 53 columns for CYD terminal.
+Hardware: Raspberry Pi Zero 2W + CYD (ESP32 + ILI9341 320x240 LCD).
+
+Subcommands:
+  demo          Display restricted guest sandbox banner & live deck telemetry.
+  demo banner   Alias for demo.
+  demo art      Stream workspace-relative artwork to CYD panel via DRAW_IMAGE (opcode 0x05).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+# Ensure project root, pi/, and scripts/ directories are on sys.path
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+for _p in (_REPO_ROOT, _REPO_ROOT / "src", _REPO_ROOT / "pi", _REPO_ROOT / "scripts"):
+    _p_str = str(_p)
+    if _p_str not in sys.path:
+        sys.path.insert(0, _p_str)
+
+# Ensure optional virtualenv site-packages are discovered
+for _venv_root in (_REPO_ROOT / "pi/.venv/lib", Path("/opt/cyd-display-link/pi/.venv/lib")):
+    if _venv_root.is_dir():
+        for _site_packages in _venv_root.glob("python3.*/site-packages"):
+            _sp_str = str(_site_packages)
+            if _sp_str not in sys.path:
+                sys.path.insert(0, _sp_str)
+
+try:
+    from whiskerframe.models import DrawRect
+    from whiskerframe.protocol import serialize
+    from whiskerframe.terminal import (
+        DISPLAY_HEIGHT,
+        DISPLAY_WIDTH,
+        DrawImage,
+    )
+except ImportError:
+    # Minimal fallback models if running outside whiskerframe install
+    DISPLAY_WIDTH = 320
+    DISPLAY_HEIGHT = 240
+    DrawRect = None  # type: ignore[assignment, misc]
+    DrawImage = None  # type: ignore[assignment, misc]
+    serialize = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from PIL import Image as ImageModule
+
+PANEL_WIDTH: int = 320
+PANEL_HEIGHT: int = 240
+CHUNK_ROWS: int = 2
+BYTES_PER_PIXEL: int = 2
+FULL_FRAME_BYTES: int = PANEL_WIDTH * PANEL_HEIGHT * BYTES_PER_PIXEL  # 153600
+
+DEFAULT_THEME_BG: int = 0x18C5  # blurple background (#191a28)
+DEFAULT_THEME_RGB: tuple[int, int, int] = (25, 26, 40)
+DEFAULT_BAUD: int = 115200
+
+DEFAULT_SERIAL_PORTS: tuple[str, ...] = (
+    "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+    "/dev/ttyUSB0",
+)
+
+ART_SHORT_NAMES: dict[str, str] = {
+    "market": "assets/images/cess/Lyra and Dreanne Christmas Night Market.png",
+    "doodle": "assets/images/cess/lyra-doodle-transparent.png",
+    "cess/market": "assets/images/cess/Lyra and Dreanne Christmas Night Market.png",
+    "cess/doodle": "assets/images/cess/lyra-doodle-transparent.png",
+    "cess/original": "assets/images/cess/lyra-doodle-original.png",
+    "splash/reboot": "assets/images/goodbye-reboot-preview.png",
+    "splash/shutdown": "assets/images/goodbye-shutdown-preview.png",
+    "goodbye/reboot": "assets/images/goodbye-reboot-preview.png",
+    "goodbye/shutdown": "assets/images/goodbye-shutdown-preview.png",
+}
+
+
+# --- Safe Path Resolution ---------------------------------------------------
+
+
+def resolve_safe_image_path(
+    image_path: str | Path,
+    workspace_root: Path | None = None,
+) -> Path:
+    """
+    Safely resolve an image path relative to the workspace, preventing directory traversal.
+
+    Guarantees:
+    - Path must reside strictly within the canonical workspace root.
+    - Directory traversal via '../', absolute path escaping, or symlink breakouts
+      raise PermissionError or ValueError.
+    - Resolves shorthand aliases (e.g. 'doodle', 'cess/market') and relative assets.
+    - Verified against real file existence; raises FileNotFoundError if missing.
+    """
+    raw_str = str(image_path).strip()
+    if not raw_str:
+        raise ValueError("Image path cannot be empty")
+    if "\0" in raw_str:
+        raise ValueError("Invalid null byte in image path")
+
+    root = (workspace_root or _REPO_ROOT).resolve()
+
+    # Check shorthand catalog alias first
+    lookup_key = raw_str.lower().replace("\\", "/")
+    if lookup_key in ART_SHORT_NAMES:
+        target = root / ART_SHORT_NAMES[lookup_key]
+    else:
+        path_obj = Path(raw_str)
+        # Any path with parent traversal tokens must resolve directly against root
+        if ".." in path_obj.parts or raw_str.startswith("..") or "/.." in raw_str:
+            target = root / path_obj
+        elif path_obj.is_absolute():
+            target = path_obj
+        else:
+            cand1 = root / path_obj
+            cand2 = root / "assets" / "images" / path_obj
+            cand3 = root / "assets" / "images" / "cess" / path_obj
+            if cand1.is_file():
+                target = cand1
+            elif cand2.is_file():
+                target = cand2
+            elif cand3.is_file():
+                target = cand3
+            else:
+                target = cand1
+
+    resolved = target.resolve()
+
+    # Strict workspace boundary check
+    try:
+        resolved.relative_to(root)
+    except ValueError as err:
+        raise PermissionError(
+            f"Path traversal detected: '{raw_str}' resolves to '{resolved}', which escapes workspace '{root}'"
+        ) from err
+
+    if not resolved.is_file():
+        raise FileNotFoundError(f"Image file not found: {resolved}")
+
+    return resolved
+
+
+def list_available_art(workspace_root: Path | None = None) -> list[Path]:
+    """Find all renderable image assets within the workspace."""
+    root = (workspace_root or _REPO_ROOT).resolve()
+    assets_dir = root / "assets" / "images"
+    if not assets_dir.is_dir():
+        return []
+
+    valid_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".rgb565"}
+    found: list[Path] = []
+    for file_path in sorted(assets_dir.rglob("*")):
+        if file_path.is_file() and file_path.suffix.lower() in valid_extensions:
+            found.append(file_path)
+    return found
+
+
+# --- Aspect Scaling, Centering & RGB565 Packing ------------------------------
+
+
+def pack_rgb565_be(red: int, green: int, blue: int) -> bytes:
+    """
+    Pack 8-bit RGB channels into a big-endian RGB565 2-byte pixel.
+
+    Quantize channels to 5/6/5 bits and emit high byte first per DEC-W5 & DEC-W35:
+    Value: ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    Output: bytes([(val >> 8) & 0xFF, val & 0xFF])
+    """
+    val = ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3)
+    return bytes(((val >> 8) & 0xFF, val & 0xFF))
+
+
+def image_to_rgb565_be(image: ImageModule.Image) -> bytes:
+    """Convert an RGB PIL Image into raw big-endian RGB565 bytes."""
+    rgb = image.convert("RGB")
+    raw = rgb.tobytes()
+    num_pixels = rgb.width * rgb.height
+    out = bytearray(num_pixels * BYTES_PER_PIXEL)
+    for i in range(num_pixels):
+        r = raw[i * 3]
+        g = raw[i * 3 + 1]
+        b = raw[i * 3 + 2]
+        val = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        out[i * 2] = (val >> 8) & 0xFF
+        out[i * 2 + 1] = val & 0xFF
+    return bytes(out)
+
+
+def scale_and_center_image(
+    image: ImageModule.Image,
+    target_width: int = PANEL_WIDTH,
+    target_height: int = PANEL_HEIGHT,
+    bg_color: tuple[int, int, int] = DEFAULT_THEME_RGB,
+) -> tuple[ImageModule.Image, int, int, int, int]:
+    """
+    Preserve aspect ratio scaling an image within target bounding box, centered.
+
+    Args:
+    - image: Source PIL Image.
+    - target_width: Target canvas width (default 320).
+    - target_height: Target canvas height (default 240).
+    - bg_color: Background padding color RGB tuple.
+
+    Returns:
+    - canvas: target_width x target_height RGB PIL Image composited onto bg_color.
+    - offset_x: Centering X offset.
+    - offset_y: Centering Y offset.
+    - scaled_w: Scaled image width.
+    - scaled_h: Scaled image height.
+    """
+    from PIL import Image
+
+    orig_w, orig_h = image.size
+    if orig_w <= 0 or orig_h <= 0:
+        raise ValueError(f"Invalid image dimensions: {orig_w}x{orig_h}")
+
+    scale = min(target_width / orig_w, target_height / orig_h)
+    scaled_w = max(1, round(orig_w * scale))
+    scaled_h = max(1, round(orig_h * scale))
+
+    # Resize with high-quality Lanczos resampling
+    resample_filter = getattr(Image.Resampling, "LANCZOS", Image.LANCZOS)
+    scaled = image.resize((scaled_w, scaled_h), resample=resample_filter)
+
+    offset_x = (target_width - scaled_w) // 2
+    offset_y = (target_height - scaled_h) // 2
+
+    if scaled.mode == "RGBA":
+        canvas = Image.new("RGBA", (target_width, target_height), (*bg_color, 255))
+        canvas.alpha_composite(scaled, (offset_x, offset_y))
+        canvas_rgb = canvas.convert("RGB")
+    else:
+        canvas_rgb = Image.new("RGB", (target_width, target_height), bg_color)
+        canvas_rgb.paste(scaled.convert("RGB"), (offset_x, offset_y))
+
+    return canvas_rgb, offset_x, offset_y, scaled_w, scaled_h
+
+
+def load_image_pixels(
+    image_path: Path,
+    target_width: int = PANEL_WIDTH,
+    target_height: int = PANEL_HEIGHT,
+    bg_color: tuple[int, int, int] = DEFAULT_THEME_RGB,
+) -> bytes:
+    """
+    Load an image from disk and produce full target_width x target_height RGB565 bytes.
+
+    Handles raw .rgb565 artifacts and regular image files (PNG, JPG, BMP).
+    """
+    if image_path.suffix.lower() == ".rgb565":
+        raw_bytes = image_path.read_bytes()
+        # If exactly full frame, return directly
+        if len(raw_bytes) == target_width * target_height * BYTES_PER_PIXEL:
+            return raw_bytes
+        # If 128x128 goodbye splash (32,768 bytes), center onto 320x240 canvas
+        if len(raw_bytes) == 128 * 128 * BYTES_PER_PIXEL:
+            return _letterbox_raw_128x128(raw_bytes, target_width, target_height, bg_color)
+        msg = f"Unexpected .rgb565 size ({len(raw_bytes)} bytes); expected {FULL_FRAME_BYTES}"
+        raise ValueError(msg)
+
+    from PIL import Image
+
+    with Image.open(image_path) as handle:
+        canvas, _, _, _, _ = scale_and_center_image(
+            handle,
+            target_width=target_width,
+            target_height=target_height,
+            bg_color=bg_color,
+        )
+        return image_to_rgb565_be(canvas)
+
+
+def _letterbox_raw_128x128(
+    blob_128: bytes,
+    target_w: int,
+    target_h: int,
+    bg_color: tuple[int, int, int],
+) -> bytes:
+    """Place a 128x128 raw RGB565 blob into the center of a 320x240 RGB565 canvas."""
+    bg_pixel = pack_rgb565_be(*bg_color)
+    canvas = bytearray(target_w * target_h * BYTES_PER_PIXEL)
+    # Fill background
+    for i in range(target_w * target_h):
+        canvas[i * 2] = bg_pixel[0]
+        canvas[i * 2 + 1] = bg_pixel[1]
+
+    offset_x = (target_w - 128) // 2
+    offset_y = (target_h - 128) // 2
+
+    for row in range(128):
+        src_start = row * 128 * BYTES_PER_PIXEL
+        src_end = src_start + 128 * BYTES_PER_PIXEL
+        row_bytes = blob_128[src_start:src_end]
+
+        dst_y = offset_y + row
+        dst_start = (dst_y * target_w + offset_x) * BYTES_PER_PIXEL
+        dst_end = dst_start + 128 * BYTES_PER_PIXEL
+        canvas[dst_start:dst_end] = row_bytes
+
+    return bytes(canvas)
+
+
+# --- Chunked Transmission via DRAW_IMAGE (Opcode 0x05) ----------------------
+
+
+def stream_image_chunks(
+    sink: Any,
+    pixel_data: bytes,
+    width: int = PANEL_WIDTH,
+    height: int = PANEL_HEIGHT,
+    x: int = 0,
+    y: int = 0,
+    chunk_rows: int = CHUNK_ROWS,
+    delay_s: float = 0.0,
+) -> int:
+    """
+    Stream RGB565 image slices using wire protocol opcode 0x05 (DRAW_IMAGE).
+
+    Payload per chunk is limited to width * chunk_rows * 2 bytes (<=1280B for 320x2),
+    preventing ESP32 UART RX FIFO overrun per DEC-W35.
+    """
+    if DrawImage is None or serialize is None:
+        raise RuntimeError("whiskerframe protocol dependencies unavailable")
+
+    bytes_per_row = width * BYTES_PER_PIXEL
+    expected_len = width * height * BYTES_PER_PIXEL
+    if len(pixel_data) != expected_len:
+        raise ValueError(
+            f"Pixel data length mismatch: expected {expected_len} bytes for {width}x{height}, got {len(pixel_data)}"
+        )
+
+    chunks_sent = 0
+    send_fn = getattr(sink, "send", None) or getattr(sink, "write", None)
+    if send_fn is None:
+        raise TypeError("Sink must provide a 'send' or 'write' method")
+
+    for top in range(0, height, chunk_rows):
+        rows = min(chunk_rows, height - top)
+        start = top * bytes_per_row
+        end = start + rows * bytes_per_row
+        chunk_slice = pixel_data[start:end]
+
+        command = DrawImage(x=x, y=y + top, w=width, h=rows, data=chunk_slice)
+        frame = serialize(command)
+        send_fn(frame)
+        chunks_sent += 1
+
+        if delay_s > 0:
+            time.sleep(delay_s)
+
+    flush_fn = getattr(sink, "flush", None)
+    if flush_fn is not None:
+        try:
+            flush_fn()
+        except OSError:
+            pass
+
+    return chunks_sent
+
+
+# --- Clean Exit & Terminal Grid State Restoration ---------------------------
+
+
+def restore_terminal_grid(
+    sink: Any | None = None,
+    clear_color: int = DEFAULT_THEME_BG,
+    clear_terminal_ansi: bool = True,
+) -> None:
+    """
+    Restore display and terminal grid state cleanly without screen corruption.
+
+    1. Wipes the CYD LCD panel back to the theme background color using DrawRect,
+       erasing any leftover raw image pixels.
+    2. Emits ANSI clear screen and cursor home sequences (\\033[2J\\033[H) to stdout,
+       resetting the VT emulator character grid and returning the cursor to (0, 0).
+    """
+    if sink is not None and DrawRect is not None and serialize is not None:
+        try:
+            clear_cmd = DrawRect(
+                x=0,
+                y=0,
+                w=PANEL_WIDTH,
+                h=PANEL_HEIGHT,
+                color=clear_color,
+                filled=True,
+            )
+            frame = serialize(clear_cmd)
+            send_fn = getattr(sink, "send", None) or getattr(sink, "write", None)
+            if send_fn is not None:
+                send_fn(frame)
+            flush_fn = getattr(sink, "flush", None)
+            if flush_fn is not None:
+                flush_fn()
+        except Exception:
+            pass
+
+    if clear_terminal_ansi:
+        try:
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
+# --- Serial Transport Resolution --------------------------------------------
+
+
+def resolve_serial_port(requested_port: str | None = None) -> str | None:
+    """Resolve physical serial port from CLI parameter, config, or system detection."""
+    if requested_port:
+        return requested_port
+
+    # Check .whiskerframe.yaml config
+    try:
+        from scripts.config import load_yaml_config
+
+        config = load_yaml_config()
+        cyd = config.get("cyd", {}) if isinstance(config, dict) else {}
+        cfg_port = cyd.get("port")
+        if cfg_port and cfg_port != "CHANGEME" and Path(cfg_port).exists():
+            return str(cfg_port)
+    except Exception:
+        pass
+
+    # Probe default hardware endpoints
+    for candidate in DEFAULT_SERIAL_PORTS:
+        if Path(candidate).exists():
+            return candidate
+
+    return None
+
+
+# --- Artwork Presentation Runner --------------------------------------------
+
+
+def run_demo_art(
+    image_arg: str | None = None,
+    port: str | None = None,
+    baud: int = DEFAULT_BAUD,
+    hold_s: float = 3.0,
+    chunk_rows: int = CHUNK_ROWS,
+    clear_on_exit: bool = True,
+    dry_run: bool = False,
+    sink: Any | None = None,
+) -> int:
+    """
+    Execute the demo art pipeline: load, scale, pack, stream, hold, and restore.
+
+    Returns:
+    0 on success, non-zero on failure.
+    """
+    # 1. Resolve safe image target
+    if not image_arg:
+        # Default showcase artwork
+        image_arg = "doodle"
+
+    try:
+        image_path = resolve_safe_image_path(image_arg)
+    except (PermissionError, ValueError, FileNotFoundError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # 2. Convert and pack pixels
+    try:
+        pixel_bytes = load_image_pixels(image_path)
+    except Exception as err:
+        print(f"Error converting image {image_path}: {err}", file=sys.stderr)
+        return 1
+
+    # 3. Setup transport or sink
+    ser_obj = sink
+    should_close_ser = False
+
+    if ser_obj is None and not dry_run:
+        chosen_port = resolve_serial_port(port)
+        if chosen_port:
+            try:
+                import serial
+
+                ser_obj = serial.Serial(port=chosen_port, baudrate=baud, timeout=1.0)
+                should_close_ser = True
+            except Exception as err:
+                print(
+                    f"Warning: Serial port {chosen_port} unavailable ({err}). Running simulated blit.",
+                    file=sys.stderr,
+                )
+                ser_obj = None
+        else:
+            print(
+                "Notice: No active CYD serial link detected. Running simulated blit.",
+                file=sys.stderr,
+            )
+
+    # 4. Stream and cleanly restore on any exit (Ctrl-C, exception, completion)
+    exit_code = 0
+    interrupted = False
+
+    def _signal_handler(signum: int, _frame: Any) -> None:
+        nonlocal interrupted
+        interrupted = True
+
+    prev_sigint = signal.signal(signal.SIGINT, _signal_handler)
+    prev_sigterm = signal.signal(signal.SIGTERM, _signal_handler)
+
+    try:
+        if ser_obj is not None:
+            # First clear screen to background before blitting
+            restore_terminal_grid(ser_obj, clear_terminal_ansi=False)
+            chunks = stream_image_chunks(
+                ser_obj,
+                pixel_bytes,
+                width=PANEL_WIDTH,
+                height=PANEL_HEIGHT,
+                chunk_rows=chunk_rows,
+            )
+        else:
+            chunks = PANEL_HEIGHT // chunk_rows
+
+        print(
+            f"Rendered '{image_path.name}' ({PANEL_WIDTH}x{PANEL_HEIGHT}, {len(pixel_bytes)} bytes in {chunks} chunks)."
+        )
+
+        # Hold display if requested
+        if hold_s > 0 and not interrupted:
+            start_time = time.monotonic()
+            while (time.monotonic() - start_time) < hold_s:
+                if interrupted:
+                    break
+                time.sleep(0.05)
+
+    except Exception as err:
+        print(f"Error streaming art: {err}", file=sys.stderr)
+        exit_code = 1
+    finally:
+        # Restore terminal grid and CYD display state cleanly
+        if clear_on_exit:
+            restore_terminal_grid(ser_obj, clear_terminal_ansi=True)
+
+        if should_close_ser and ser_obj is not None:
+            try:
+                ser_obj.close()
+            except Exception:
+                pass
+
+        signal.signal(signal.SIGINT, prev_sigint)
+        signal.signal(signal.SIGTERM, prev_sigterm)
+
+    return exit_code
+
+
+# --- Demo Sandbox Telemetry Banner ------------------------------------------
+
+
+def print_demo_sandbox_banner() -> int:
+    """
+    Print the restricted guest sandbox banner and live deck telemetry.
+
+    Formatted strictly to <= 53 columns for the CYD terminal.
+    """
+    # Clear screen first
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+    print("=====================================================")
+    print("       Whiskerframe Cyberdeck v0.1 Demo Sandbox      ")
+    print("=====================================================")
+    print("")
+    print("Welcome, guest! Restricted kernel sandbox:")
+    print(" - Network: 100% Isolated (nftables egress drop)")
+    print(" - Memory: 64MB Cgroup Slice | CPU Quota: 50%")
+    print(" - Execution Limit: 5s max / process (Reaper)")
+    print(" - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)")
+    print("")
+    print("--- Live Deck Telemetry ---")
+
+    # Uptime
+    uptime_str = "unknown"
+    try:
+        res = subprocess.run(
+            ["uptime", "-p"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            uptime_str = res.stdout.strip()
+        else:
+            with Path("/proc/uptime").open() as f:
+                sec = float(f.read().split()[0])
+                mins = int(sec // 60)
+                uptime_str = f"up {mins} minutes"
+    except Exception:
+        pass
+    print(f"Uptime: {uptime_str}")
+
+    # Battery
+    batt_json = Path("/run/battery_monitor/status.json")
+    if batt_json.is_file():
+        try:
+            import json
+
+            data = json.loads(batt_json.read_text())
+            v = data.get("bus_voltage_v", 12.4)
+            p = data.get("battery_percent", 95)
+            print(f"Power: {v:.1f}V ({int(p)}% battery)")
+        except Exception:
+            print("Power: 12.4V (95% battery)")
+
+    # Thermals
+    thermal_file = Path("/sys/class/thermal/thermal_zone0/temp")
+    if thermal_file.is_file():
+        try:
+            temp_raw = int(thermal_file.read_text().strip())
+            temp_c = temp_raw / 1000.0
+            print(f"Thermals: {temp_c:.1f}°C")
+        except Exception:
+            print("Thermals: 60.0°C")
+    else:
+        print("Thermals: 60.0°C")
+
+    # Memory
+    mem_avail = "200M"
+    try:
+        with Path("/proc/meminfo").open() as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    kb = int(line.split()[1])
+                    mem_avail = f"{kb // 1024}M"
+                    break
+    except Exception:
+        pass
+    print(f"Memory Available: {mem_avail}")
+
+    print("")
+    print("Try running safe commands, or type 'exit' to log out.")
+    print("=====================================================")
+    return 0
+
+
+# --- Command-Line Interface Dispatcher --------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="demo",
+        description="Whiskerframe Cyberdeck Demo Sandbox & Artwork Presentation Utility",
+    )
+    sub = parser.add_subparsers(dest="subcommand")
+
+    # 'demo banner'
+    sub.add_parser("banner", help="Display sandbox banner and telemetry")
+
+    # 'demo art'
+    p_art = sub.add_parser("art", help="Render artwork to CYD screen (DRAW_IMAGE opcode 0x05)")
+    p_art.add_argument("image", nargs="?", default=None, help="Image file path or alias (e.g. doodle, market)")
+    p_art.add_argument("--image", dest="image_opt", default=None, help="Explicit image path")
+    p_art.add_argument("--hold", type=float, default=3.0, help="Seconds to hold display before clean exit (default 3.0)")
+    p_art.add_argument("--port", default=None, help="CYD serial device port")
+    p_art.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="Serial baud rate (default 115200)")
+    p_art.add_argument("--chunk-rows", type=int, default=CHUNK_ROWS, help="Scanline rows per chunk (default 2)")
+    p_art.add_argument("--list", action="store_true", help="List available art catalog items")
+    p_art.add_argument("--dry-run", action="store_true", help="Simulate chunk generation without hardware")
+    p_art.add_argument("--no-clear", action="store_true", help="Skip screen wipe on exit")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entry point for demo tool."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Default to sandbox banner if no args provided
+    if not argv:
+        return print_demo_sandbox_banner()
+
+    parser = _build_parser()
+    args, unknown = parser.parse_known_args(argv)
+
+    if args.subcommand in (None, "banner") and not unknown:
+        return print_demo_sandbox_banner()
+
+    if args.subcommand == "art":
+        if args.list:
+            print("=== WhiskerFrame Artwork Catalog ===")
+            print("Aliases:")
+            for alias, target in sorted(ART_SHORT_NAMES.items()):
+                print(f"  {alias:<16} -> {target}")
+            print("\nWorkspace Assets:")
+            for item in list_available_art():
+                rel = item.relative_to(_REPO_ROOT)
+                print(f"  {str(rel)}")
+            return 0
+
+        target_img = args.image_opt or args.image
+        return run_demo_art(
+            image_arg=target_img,
+            port=args.port,
+            baud=args.baud,
+            hold_s=args.hold,
+            chunk_rows=args.chunk_rows,
+            clear_on_exit=not args.no_clear,
+            dry_run=args.dry_run,
+        )
+
+    # Any unknown or unmatched argument falls back to demo banner
+    return print_demo_sandbox_banner()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

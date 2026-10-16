@@ -18,6 +18,7 @@ driver and no Pillow.
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -216,6 +217,35 @@ def _load_yaml_config() -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _load_theme_file(name: str) -> dict[str, Any] | None:
+    r"""
+    Load a named JSON theme from ``assets/themes/`` under the deploy root.
+
+    Resolve ``name`` (with or without a ``.json`` suffix) under
+    ``assets/themes/`` relative to the repo/deploy root, confining it to that
+    directory so a config value can never read an arbitrary path. Any failure
+    (missing file, bad JSON, escape attempt, non-mapping) returns ``None`` so
+    the caller falls back to the inline block.
+
+    Args:
+    - name (`str`): Theme name or filename, e.g. ``amber-crt`` or ``amber-crt.json``.
+
+    Returns:
+    `dict[str, Any] | None`: The parsed theme mapping, or ``None`` on any failure.
+
+    """
+    themes_dir = (Path(__file__).resolve().parent.parent.parent / "assets" / "themes").resolve()
+    filename = name if name.endswith(".json") else f"{name}.json"
+    target = (themes_dir / filename).resolve()
+    if themes_dir not in target.parents or not target.is_file():
+        return None
+    try:
+        parsed = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _coerce_int(value: Any, fallback: int) -> int:
     """
     Coerce a config value to an ``int``, falling back on failure.
@@ -282,6 +312,14 @@ def load_theme(config: Mapping[str, Any] | None = None) -> Theme:
     theme_cfg = terminal.get("theme") if isinstance(terminal, dict) else None
     if not isinstance(theme_cfg, dict):
         theme_cfg = {}
+    # A named theme_file (JSON under assets/themes/) overrides the inline block;
+    # a missing/unreadable/invalid file silently falls back to the inline block
+    # and then the baked-in palette, so a bad name never crashes the emulator.
+    theme_file = terminal.get("theme_file") if isinstance(terminal, dict) else None
+    if isinstance(theme_file, str) and theme_file.strip():
+        loaded_file = _load_theme_file(theme_file.strip())
+        if loaded_file is not None:
+            theme_cfg = loaded_file
     accents = {
         "pink": _coerce_int(theme_cfg.get("accent_pink"), _FALLBACK_ACCENTS["pink"]),
         "purple": _coerce_int(

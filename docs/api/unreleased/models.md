@@ -1,5 +1,5 @@
-Module whiskerframe.models
-==========================
+<h1 id=""><a href="#">Module whiskerframe.models</a></h1>
+
 Pydantic command models for the CYD Display Link wire protocol.
 
 Define the validated, serialization-ready command models the `Command_Builder`
@@ -22,270 +22,479 @@ coordinate, color, or font-size selector is rejected before it can reach the
 serializer or the device. This module is pure: it imports no Pillow (or any
 imaging library) and stays usable on the serial command path.
 
-Variables
----------
+[← Go back to `whiskerframe`](./index.md)
 
-`UINT16_MAX: int`
-:   Maximum value of a ``uint16`` wire field (65535), including RGB565 colors.
+<h2 id="variables"><a href="#variables">Variables</a></h2>
 
-`UINT8_MAX: int`
-:   Maximum value of a ``uint8`` wire field (255).
+<h3 id="variables-uint16_max"><a href="#variables-uint16_max"><pre>UINT16_MAX</pre></a></h3>
 
-Classes
--------
+```python
+int
+```
 
-`DrawRect(**data: Any)`
-:   Resolved ``DRAW_RECT`` (``0x02``) command matching the wire payload layout.
-    
-    Hold the fully resolved fields the serializer encodes into a ``DRAW_RECT``
-    payload: the host-resolved top-left pixel ``(x, y)``, the ``(w, h)``
-    dimensions (all ``uint16``), the RGB565 ``color`` (``uint16``), and the
-    ``filled`` flag bit packed into the payload's ``uint8`` flags byte. Anchor
-    resolution happens host-side, so ``(x, y)`` is already the top-left origin
-    ready for little-endian serialization.
-    
-    The model is validated on construction (pydantic v2): coordinates,
-    dimensions, and color are bounded to ``uint16``, so an out-of-range value is
-    rejected before it reaches the wire.
-    
-    Attributes:
-    - x (`int`): Resolved top-left x pixel in ``[0, 65535]``.
-    - y (`int`): Resolved top-left y pixel in ``[0, 65535]``.
-    - w (`int`): Rectangle width in ``[0, 65535]`` px.
-    - h (`int`): Rectangle height in ``[0, 65535]`` px.
-    - color (`int`): RGB565 color in ``[0, 65535]``.
-    - filled (`bool`): Whether the rectangle is filled rather than outlined.
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+Maximum value of a ``uint16`` wire field (65535), including RGB565 colors.
 
-    ### Ancestors (in MRO)
+<h3 id="variables-uint8_max"><a href="#variables-uint8_max"><pre>UINT8_MAX</pre></a></h3>
 
-    * pydantic.main.BaseModel
+```python
+int
+```
 
-    ### Class variables
+Maximum value of a ``uint8`` wire field (255).
 
-    `color: int`
-    :   The type of the None singleton.
+<h2 id="classes"><a href="#classes">Classes</a></h2>
 
-    `filled: bool`
-    :   The type of the None singleton.
+<h3 id="classes-drawrect"><a href="#classes-drawrect"><pre>DrawRect</pre></a></h3>
 
-    `h: int`
-    :   The type of the None singleton.
+```python
+(**data: Any)
+```
 
-    `model_config`
-    :   The type of the None singleton.
+Resolved ``DRAW_RECT`` (``0x02``) command matching the wire payload layout.
 
-    `w: int`
-    :   The type of the None singleton.
+Hold the fully resolved fields the serializer encodes into a ``DRAW_RECT``
+payload: the host-resolved top-left pixel ``(x, y)``, the ``(w, h)``
+dimensions (all ``uint16``), the RGB565 ``color`` (``uint16``), and the
+``filled`` flag bit packed into the payload's ``uint8`` flags byte. Anchor
+resolution happens host-side, so ``(x, y)`` is already the top-left origin
+ready for little-endian serialization.
 
-    `x: int`
-    :   The type of the None singleton.
+The model is validated on construction (pydantic v2): coordinates,
+dimensions, and color are bounded to ``uint16``, so an out-of-range value is
+rejected before it reaches the wire.
 
-    `y: int`
-    :   The type of the None singleton.
+Attributes:
+- x (`int`): Resolved top-left x pixel in ``[0, 65535]``.
+- y (`int`): Resolved top-left y pixel in ``[0, 65535]``.
+- w (`int`): Rectangle width in ``[0, 65535]`` px.
+- h (`int`): Rectangle height in ``[0, 65535]`` px.
+- color (`int`): RGB565 color in ``[0, 65535]``.
+- filled (`bool`): Whether the rectangle is filled rather than outlined.
 
-`DrawText(**data: Any)`
-:   Resolved ``DRAW_TEXT`` (``0x01``) command matching the wire payload layout.
-    
-    Hold the fully resolved fields the serializer encodes into a ``DRAW_TEXT``
-    payload: the host-resolved anchor pixel ``(x, y)`` (both ``uint16``), the
-    packed ``anchor`` byte source, RGB565 ``color`` and ``bg_color`` (``uint16``),
-    the ``uint8`` ``font_size`` selector, the ``inverted`` and ``multiline`` flag
-    bits, the ``line_h`` per-line advance (``uint16``), and the UTF-8 ``text``.
-    All coordinate math and anchor resolution happen host-side before this model
-    is built, so the fields are ready for direct little-endian serialization.
-    
-    The model is validated on construction (pydantic v2): coordinates, colors,
-    and ``line_h`` are bounded to ``uint16`` and ``font_size`` to ``uint8``, so an
-    out-of-range value is rejected before it reaches the wire.
-    
-    Attributes:
-    - x (`int`): Resolved anchor x pixel in ``[0, 65535]``.
-    - y (`int`): Resolved anchor y pixel in ``[0, 65535]``.
-    - anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor for the text datum.
-    - color (`int`): RGB565 foreground color in ``[0, 65535]``.
-    - bg_color (`int`): RGB565 background color in ``[0, 65535]``.
-    - font_size (`int`): ``uint8`` font-size selector in ``[0, 255]``.
-    - inverted (`bool`): Whether foreground and background are swapped.
-    - multiline (`bool`): Whether the text is laid out as stacked lines.
-    - line_h (`int`): Per-line vertical advance in ``[0, 65535]`` px.
-    - text (`str`): UTF-8 text (LF-separated lines when multiline).
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+Create a new model by parsing and validating input data from keyword arguments.
 
-    ### Ancestors (in MRO)
+Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+validated to form a valid model.
 
-    * pydantic.main.BaseModel
+`self` is explicitly positional-only to allow `self` as a field name.
 
-    ### Class variables
+<h4 id="classes-drawrect-ancestors-in-mro"><a href="#classes-drawrect-ancestors-in-mro">Ancestors (in MRO)</a></h4>
 
-    `anchor: Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']`
-    :   The type of the None singleton.
+- pydantic.main.BaseModel
 
-    `bg_color: int`
-    :   The type of the None singleton.
+<h4 id="classes-drawrect-class-variables"><a href="#classes-drawrect-class-variables">Class variables</a></h4>
 
-    `color: int`
-    :   The type of the None singleton.
+<h5 id="classes-drawrect-class-variables-color"><a href="#classes-drawrect-class-variables-color"><pre>color</pre></a></h5>
 
-    `font_size: int`
-    :   The type of the None singleton.
+```python
+int
+```
 
-    `inverted: bool`
-    :   The type of the None singleton.
+The type of the None singleton.
 
-    `line_h: int`
-    :   The type of the None singleton.
+<h5 id="classes-drawrect-class-variables-filled"><a href="#classes-drawrect-class-variables-filled"><pre>filled</pre></a></h5>
 
-    `model_config`
-    :   The type of the None singleton.
+```python
+bool
+```
 
-    `multiline: bool`
-    :   The type of the None singleton.
+The type of the None singleton.
 
-    `text: str`
-    :   The type of the None singleton.
+<h5 id="classes-drawrect-class-variables-h"><a href="#classes-drawrect-class-variables-h"><pre>h</pre></a></h5>
 
-    `x: int`
-    :   The type of the None singleton.
+```python
+int
+```
 
-    `y: int`
-    :   The type of the None singleton.
+The type of the None singleton.
 
-`RectConfig(**data: Any)`
-:   Configuration for a rectangle-drawing operation.
-    
-    Capture the anchor, color, and fill style a caller supplies to a rectangle
-    operation. ``anchor`` is the two-character `whiskerframe.anchors.Anchor`
-    used to pin the rectangle (default ``"lt"`` top-left); ``color`` is an RGB565
-    ``uint16``; ``filled`` selects a filled rectangle rather than an outline.
-    
-    Attributes:
-    - anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor. Defaults to ``"lt"``.
-    - color (`int`): RGB565 color in ``[0, 65535]``.
-    - filled (`bool`): Whether the rectangle is filled rather than outlined.
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+<h5 id="classes-drawrect-class-variables-model_config"><a href="#classes-drawrect-class-variables-model_config"><pre>model_config</pre></a></h5>
 
-    ### Ancestors (in MRO)
+The type of the None singleton.
 
-    * pydantic.main.BaseModel
+<h5 id="classes-drawrect-class-variables-w"><a href="#classes-drawrect-class-variables-w"><pre>w</pre></a></h5>
 
-    ### Class variables
+```python
+int
+```
 
-    `anchor: Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']`
-    :   The type of the None singleton.
+The type of the None singleton.
 
-    `color: int`
-    :   The type of the None singleton.
+<h5 id="classes-drawrect-class-variables-x"><a href="#classes-drawrect-class-variables-x"><pre>x</pre></a></h5>
 
-    `filled: bool`
-    :   The type of the None singleton.
+```python
+int
+```
 
-    `model_config`
-    :   The type of the None singleton.
+The type of the None singleton.
 
-`TextConfig(**data: Any)`
-:   Full text-command configuration: style plus anchor and multiline layout.
-    
-    Extend :class:`TextStyle` with the anchor and multiline-layout options a
-    caller supplies to a text-drawing operation. ``anchor`` is the two-character
-    `whiskerframe.anchors.Anchor` used to pin the text block; ``multiline``
-    enables line splitting on ``\\n`` with per-line stacking; ``line_height`` is
-    the optional explicit per-line vertical advance (``uint16``), defaulting to
-    the font's advance when omitted.
-    
-    Attributes:
-    - anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor. Defaults to ``"mm"``.
-    - multiline (`bool`): Whether the text is laid out as stacked lines.
-    - line_height (`int | None`): Optional per-line advance in ``[0, 65535]`` px.
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+<h5 id="classes-drawrect-class-variables-y"><a href="#classes-drawrect-class-variables-y"><pre>y</pre></a></h5>
 
-    ### Ancestors (in MRO)
+```python
+int
+```
 
-    * whiskerframe.models.TextStyle
-    * pydantic.main.BaseModel
+The type of the None singleton.
 
-    ### Class variables
+<h3 id="classes-drawtext"><a href="#classes-drawtext"><pre>DrawText</pre></a></h3>
 
-    `anchor: Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']`
-    :   The type of the None singleton.
+```python
+(**data: Any)
+```
 
-    `line_height: int | None`
-    :   The type of the None singleton.
+Resolved ``DRAW_TEXT`` (``0x01``) command matching the wire payload layout.
 
-    `multiline: bool`
-    :   The type of the None singleton.
+Hold the fully resolved fields the serializer encodes into a ``DRAW_TEXT``
+payload: the host-resolved anchor pixel ``(x, y)`` (both ``uint16``), the
+packed ``anchor`` byte source, RGB565 ``color`` and ``bg_color`` (``uint16``),
+the ``uint8`` ``font_size`` selector, the ``inverted`` and ``multiline`` flag
+bits, the ``line_h`` per-line advance (``uint16``), and the UTF-8 ``text``.
+All coordinate math and anchor resolution happen host-side before this model
+is built, so the fields are ready for direct little-endian serialization.
 
-`TextStyle(**data: Any)`
-:   Presentation style for a text command, mirroring imagesmacker text styling.
-    
-    Capture the color, background color, font-size selector, and inversion flag
-    used to render text. Colors are RGB565 ``uint16`` values matching the ILI9341
-    native pixel format; ``font_size`` is the ``uint8`` selector indexing the
-    static `whiskerframe.metrics.FONT_METRICS` table. When ``inverted`` is set,
-    the firmware swaps foreground and background, matching imagesmacker's
-    ``inverted`` semantics.
-    
-    The model is validated on construction (pydantic v2) and rejects extra
-    fields, so an out-of-range color or size is caught before serialization.
-    
-    Attributes:
-    - color (`int`): RGB565 foreground color in ``[0, 65535]``.
-    - bg_color (`int`): RGB565 background color in ``[0, 65535]`` (used when inverted).
-    - font_size (`int`): ``uint8`` font-size selector in ``[0, 255]``.
-    - inverted (`bool`): Whether to swap foreground and background.
-    
-    Create a new model by parsing and validating input data from keyword arguments.
-    
-    Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
-    validated to form a valid model.
-    
-    `self` is explicitly positional-only to allow `self` as a field name.
+The model is validated on construction (pydantic v2): coordinates, colors,
+and ``line_h`` are bounded to ``uint16`` and ``font_size`` to ``uint8``, so an
+out-of-range value is rejected before it reaches the wire.
 
-    ### Ancestors (in MRO)
+Attributes:
+- x (`int`): Resolved anchor x pixel in ``[0, 65535]``.
+- y (`int`): Resolved anchor y pixel in ``[0, 65535]``.
+- anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor for the text datum.
+- color (`int`): RGB565 foreground color in ``[0, 65535]``.
+- bg_color (`int`): RGB565 background color in ``[0, 65535]``.
+- font_size (`int`): ``uint8`` font-size selector in ``[0, 255]``.
+- inverted (`bool`): Whether foreground and background are swapped.
+- multiline (`bool`): Whether the text is laid out as stacked lines.
+- line_h (`int`): Per-line vertical advance in ``[0, 65535]`` px.
+- text (`str`): UTF-8 text (LF-separated lines when multiline).
 
-    * pydantic.main.BaseModel
+Create a new model by parsing and validating input data from keyword arguments.
 
-    ### Descendants
+Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+validated to form a valid model.
 
-    * whiskerframe.models.TextConfig
+`self` is explicitly positional-only to allow `self` as a field name.
 
-    ### Class variables
+<h4 id="classes-drawtext-ancestors-in-mro"><a href="#classes-drawtext-ancestors-in-mro">Ancestors (in MRO)</a></h4>
 
-    `bg_color: int`
-    :   The type of the None singleton.
+- pydantic.main.BaseModel
 
-    `color: int`
-    :   The type of the None singleton.
+<h4 id="classes-drawtext-class-variables"><a href="#classes-drawtext-class-variables">Class variables</a></h4>
 
-    `font_size: int`
-    :   The type of the None singleton.
+<h5 id="classes-drawtext-class-variables-anchor"><a href="#classes-drawtext-class-variables-anchor"><pre>anchor</pre></a></h5>
 
-    `inverted: bool`
-    :   The type of the None singleton.
+```python
+Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']
+```
 
-    `model_config`
-    :   The type of the None singleton.
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-bg_color"><a href="#classes-drawtext-class-variables-bg_color"><pre>bg_color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-color"><a href="#classes-drawtext-class-variables-color"><pre>color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-font_size"><a href="#classes-drawtext-class-variables-font_size"><pre>font_size</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-inverted"><a href="#classes-drawtext-class-variables-inverted"><pre>inverted</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-line_h"><a href="#classes-drawtext-class-variables-line_h"><pre>line_h</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-model_config"><a href="#classes-drawtext-class-variables-model_config"><pre>model_config</pre></a></h5>
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-multiline"><a href="#classes-drawtext-class-variables-multiline"><pre>multiline</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-text"><a href="#classes-drawtext-class-variables-text"><pre>text</pre></a></h5>
+
+```python
+str
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-x"><a href="#classes-drawtext-class-variables-x"><pre>x</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-drawtext-class-variables-y"><a href="#classes-drawtext-class-variables-y"><pre>y</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h3 id="classes-rectconfig"><a href="#classes-rectconfig"><pre>RectConfig</pre></a></h3>
+
+```python
+(**data: Any)
+```
+
+Configuration for a rectangle-drawing operation.
+
+Capture the anchor, color, and fill style a caller supplies to a rectangle
+operation. ``anchor`` is the two-character `whiskerframe.anchors.Anchor`
+used to pin the rectangle (default ``"lt"`` top-left); ``color`` is an RGB565
+``uint16``; ``filled`` selects a filled rectangle rather than an outline.
+
+Attributes:
+- anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor. Defaults to ``"lt"``.
+- color (`int`): RGB565 color in ``[0, 65535]``.
+- filled (`bool`): Whether the rectangle is filled rather than outlined.
+
+Create a new model by parsing and validating input data from keyword arguments.
+
+Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+validated to form a valid model.
+
+`self` is explicitly positional-only to allow `self` as a field name.
+
+<h4 id="classes-rectconfig-ancestors-in-mro"><a href="#classes-rectconfig-ancestors-in-mro">Ancestors (in MRO)</a></h4>
+
+- pydantic.main.BaseModel
+
+<h4 id="classes-rectconfig-class-variables"><a href="#classes-rectconfig-class-variables">Class variables</a></h4>
+
+<h5 id="classes-rectconfig-class-variables-anchor"><a href="#classes-rectconfig-class-variables-anchor"><pre>anchor</pre></a></h5>
+
+```python
+Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']
+```
+
+The type of the None singleton.
+
+<h5 id="classes-rectconfig-class-variables-color"><a href="#classes-rectconfig-class-variables-color"><pre>color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-rectconfig-class-variables-filled"><a href="#classes-rectconfig-class-variables-filled"><pre>filled</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h5 id="classes-rectconfig-class-variables-model_config"><a href="#classes-rectconfig-class-variables-model_config"><pre>model_config</pre></a></h5>
+
+The type of the None singleton.
+
+<h3 id="classes-textconfig"><a href="#classes-textconfig"><pre>TextConfig</pre></a></h3>
+
+```python
+(**data: Any)
+```
+
+Full text-command configuration: style plus anchor and multiline layout.
+
+Extend :class:`TextStyle` with the anchor and multiline-layout options a
+caller supplies to a text-drawing operation. ``anchor`` is the two-character
+`whiskerframe.anchors.Anchor` used to pin the text block; ``multiline``
+enables line splitting on ``\\n`` with per-line stacking; ``line_height`` is
+the optional explicit per-line vertical advance (``uint16``), defaulting to
+the font's advance when omitted.
+
+Attributes:
+- anchor (`Anchor`): Two-character ``[lmr][tmb]`` anchor. Defaults to ``"mm"``.
+- multiline (`bool`): Whether the text is laid out as stacked lines.
+- line_height (`int | None`): Optional per-line advance in ``[0, 65535]`` px.
+
+Create a new model by parsing and validating input data from keyword arguments.
+
+Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+validated to form a valid model.
+
+`self` is explicitly positional-only to allow `self` as a field name.
+
+<h4 id="classes-textconfig-ancestors-in-mro"><a href="#classes-textconfig-ancestors-in-mro">Ancestors (in MRO)</a></h4>
+
+- whiskerframe.models.TextStyle
+- pydantic.main.BaseModel
+
+<h4 id="classes-textconfig-class-variables"><a href="#classes-textconfig-class-variables">Class variables</a></h4>
+
+<h5 id="classes-textconfig-class-variables-anchor"><a href="#classes-textconfig-class-variables-anchor"><pre>anchor</pre></a></h5>
+
+```python
+Literal['lt', 'mt', 'rt', 'lm', 'mm', 'rm', 'lb', 'mb', 'rb']
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-bg_color"><a href="#classes-textconfig-class-variables-bg_color"><pre>bg_color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-color"><a href="#classes-textconfig-class-variables-color"><pre>color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-font_size"><a href="#classes-textconfig-class-variables-font_size"><pre>font_size</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-inverted"><a href="#classes-textconfig-class-variables-inverted"><pre>inverted</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-line_height"><a href="#classes-textconfig-class-variables-line_height"><pre>line_height</pre></a></h5>
+
+```python
+int | None
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-model_config"><a href="#classes-textconfig-class-variables-model_config"><pre>model_config</pre></a></h5>
+
+The type of the None singleton.
+
+<h5 id="classes-textconfig-class-variables-multiline"><a href="#classes-textconfig-class-variables-multiline"><pre>multiline</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h3 id="classes-textstyle"><a href="#classes-textstyle"><pre>TextStyle</pre></a></h3>
+
+```python
+(**data: Any)
+```
+
+Presentation style for a text command, mirroring imagesmacker text styling.
+
+Capture the color, background color, font-size selector, and inversion flag
+used to render text. Colors are RGB565 ``uint16`` values matching the ILI9341
+native pixel format; ``font_size`` is the ``uint8`` selector indexing the
+static `whiskerframe.metrics.FONT_METRICS` table. When ``inverted`` is set,
+the firmware swaps foreground and background, matching imagesmacker's
+``inverted`` semantics.
+
+The model is validated on construction (pydantic v2) and rejects extra
+fields, so an out-of-range color or size is caught before serialization.
+
+Attributes:
+- color (`int`): RGB565 foreground color in ``[0, 65535]``.
+- bg_color (`int`): RGB565 background color in ``[0, 65535]`` (used when inverted).
+- font_size (`int`): ``uint8`` font-size selector in ``[0, 255]``.
+- inverted (`bool`): Whether to swap foreground and background.
+
+Create a new model by parsing and validating input data from keyword arguments.
+
+Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be
+validated to form a valid model.
+
+`self` is explicitly positional-only to allow `self` as a field name.
+
+<h4 id="classes-textstyle-ancestors-in-mro"><a href="#classes-textstyle-ancestors-in-mro">Ancestors (in MRO)</a></h4>
+
+- pydantic.main.BaseModel
+
+<h4 id="classes-textstyle-descendants"><a href="#classes-textstyle-descendants">Descendants</a></h4>
+
+- whiskerframe.models.TextConfig
+
+<h4 id="classes-textstyle-class-variables"><a href="#classes-textstyle-class-variables">Class variables</a></h4>
+
+<h5 id="classes-textstyle-class-variables-bg_color"><a href="#classes-textstyle-class-variables-bg_color"><pre>bg_color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textstyle-class-variables-color"><a href="#classes-textstyle-class-variables-color"><pre>color</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textstyle-class-variables-font_size"><a href="#classes-textstyle-class-variables-font_size"><pre>font_size</pre></a></h5>
+
+```python
+int
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textstyle-class-variables-inverted"><a href="#classes-textstyle-class-variables-inverted"><pre>inverted</pre></a></h5>
+
+```python
+bool
+```
+
+The type of the None singleton.
+
+<h5 id="classes-textstyle-class-variables-model_config"><a href="#classes-textstyle-class-variables-model_config"><pre>model_config</pre></a></h5>
+
+The type of the None singleton.
+
+---
+
+[← Go back to `whiskerframe`](./index.md)

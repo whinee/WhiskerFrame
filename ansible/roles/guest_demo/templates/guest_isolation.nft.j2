@@ -1,0 +1,10 @@
+# Managed by Ansible: guest_demo role
+# Complete network isolation for guest demo user.
+# Drops all egress traffic from guest, including loopback (lo) to isolate local services.
+
+table inet guest_isolation {
+    chain output {
+        type filter hook output priority 0; policy accept;
+        skuid "{{ guest_user }}" counter drop
+    }
+}

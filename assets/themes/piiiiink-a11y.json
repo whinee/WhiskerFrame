@@ -1,0 +1,37 @@
+{
+  "name": "piiiiink-a11y",
+  "description": "WCAG-AA-corrected piiiiink palette: pink text on a blurple background. Reconstructed from the .whiskerframe.yaml terminal.theme block (the live loader source).",
+  "background_hex": "#191a28",
+  "bg": "0x18C5",
+  "fg": "0xFD9C",
+  "cursor": "0x2EDF",
+  "accent_pink": "0xFB7A",
+  "accent_purple": "0xBD5F",
+  "accent_blue": "0x8CDF",
+  "ansi": [
+    "0x8C76",
+    "0xFB4D",
+    "0x4EB4",
+    "0xFE8C",
+    "0x7D1F",
+    "0xFBFC",
+    "0x4F1F",
+    "0xE73E",
+    "0xB5BA",
+    "0xFC71",
+    "0x6F97",
+    "0xFF11",
+    "0xA61F",
+    "0xFCFD",
+    "0x877F",
+    "0xFFFF"
+  ],
+  "contrast": {
+    "fg_on_bg": 10.53,
+    "cursor_on_bg": 10.2,
+    "accent_pink_on_bg": 6.9,
+    "accent_purple_on_bg": 8.4,
+    "accent_blue_on_bg": 6.6
+  },
+  "_notes": "Keys match pi/terminal/theme.py terminal.theme schema (RGB565 ints as 0x hex strings; theme.py coerces via int(value, 0)). The ansi list is 16 entries: normal 0-7 then bright 8-15."
+}

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Managed by Ansible: self_heal_watchdog role
+# Network self-healing & heartbeat monitor for Whiskerframe Cyberdeck.
+# Invoked every ~{{ net_heal_check_interval_sec }}s by cyberdeck-net-heal.timer.
+# STRICT INVARIANT: NO AUTOMATIC REBOOT.
+
+set -u
+
+STATE_FILE="/run/cyberdeck/net-heal.state"
+HEARTBEAT_RUN="/run/cyberdeck/heartbeat.json"
+HEARTBEAT_PERSIST="/var/lib/whiskerframe/last-known-heartbeat.json"
+
+mkdir -p /run/cyberdeck /var/lib/whiskerframe
+
+# 1. Gather current network parameters
+DEFAULT_GW=$(ip route show default 2>/dev/null | awk '/default via/ {print $3}' | head -n1)
+WLAN_IP=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+NOW_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+NOW_EPOCH=$(date +%s)
+
+# Read persistent state if available
+FAIL_COUNT=0
+FIRST_FAIL_EPOCH=0
+LAST_TIER=0
+
+if [ -f "$STATE_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_FILE" 2>/dev/null || true
+fi
+
+# 2. Check reachability (3x ping with timeout)
+PING_SUCCESS=0
+if [ -n "$DEFAULT_GW" ]; then
+    if ping -c {{ net_heal_ping_count }} -W {{ net_heal_ping_timeout_sec }} "$DEFAULT_GW" >/dev/null 2>&1; then
+        PING_SUCCESS=1
+    fi
+fi
+
+# Fallback: if no default gw or ping failed, check 1.1.1.1 if wlan0 has an IP
+if [ $PING_SUCCESS -eq 0 ] && [ -n "$WLAN_IP" ]; then
+    if ping -c 2 -W {{ net_heal_ping_timeout_sec }} 1.1.1.1 >/dev/null 2>&1; then
+        PING_SUCCESS=1
+    fi
+fi
+
+# 3. Handle Success vs Failure Escalation
+if [ $PING_SUCCESS -eq 1 ]; then
+    # Network healthy
+    FAIL_COUNT=0
+    FIRST_FAIL_EPOCH=0
+    LAST_TIER=0
+    FAIL_DURATION_S=0
+    cat <<EOF > "$STATE_FILE"
+FAIL_COUNT=0
+FIRST_FAIL_EPOCH=0
+LAST_TIER=0
+EOF
+else
+    # Network failure detected
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    if [ "$FIRST_FAIL_EPOCH" -eq 0 ]; then
+        FIRST_FAIL_EPOCH=$NOW_EPOCH
+    fi
+    FAIL_DURATION_S=$((NOW_EPOCH - FIRST_FAIL_EPOCH))
+
+    # Escalation tiers
+    if [ "$FAIL_DURATION_S" -ge {{ net_heal_tier3_threshold_sec }} ]; then
+        # Tier 3: >15 minutes continuous failure -> reload driver
+        LAST_TIER=3
+        logger -t cyberdeck-net-heal "Tier 3 escalation: continuous fail ${FAIL_DURATION_S}s (count ${FAIL_COUNT}). Reloading brcmfmac..."
+        ip link set wlan0 down 2>/dev/null || true
+        modprobe -r brcmfmac_wcc brcmfmac 2>/dev/null || true
+        sleep 2
+        modprobe brcmfmac 2>/dev/null || true
+        systemctl restart NetworkManager 2>/dev/null || true
+    elif [ "$FAIL_DURATION_S" -ge {{ net_heal_tier2_threshold_sec }} ]; then
+        # Tier 2: >5 minutes continuous failure -> restart NetworkManager
+        LAST_TIER=2
+        logger -t cyberdeck-net-heal "Tier 2 escalation: continuous fail ${FAIL_DURATION_S}s (count ${FAIL_COUNT}). Restarting NetworkManager..."
+        systemctl restart NetworkManager 2>/dev/null || true
+    else
+        # Tier 1: 3x ping fail (<5 min) -> rfkill unblock, radio on, connect
+        LAST_TIER=1
+        logger -t cyberdeck-net-heal "Tier 1 escalation: ping fail (count ${FAIL_COUNT}). Unblocking radio and connecting..."
+        rfkill unblock wifi 2>/dev/null || true
+        nmcli radio wifi on 2>/dev/null || true
+        nmcli device connect wlan0 2>/dev/null || nmcli connection up {{ net_heal_known_connection }} 2>/dev/null || true
+    fi
+
+    cat <<EOF > "$STATE_FILE"
+FAIL_COUNT=$FAIL_COUNT
+FIRST_FAIL_EPOCH=$FIRST_FAIL_EPOCH
+LAST_TIER=$LAST_TIER
+EOF
+fi
+
+# 4. Generate Heartbeat
+BATTERY_V="null"
+BATTERY_PCT="null"
+if [ -f "/run/battery_monitor/status.json" ]; then
+    BATTERY_V=$(grep -o '"bus_voltage_v": *[0-9.]*' /run/battery_monitor/status.json 2>/dev/null | awk '{print $2}' || echo "null")
+    BATTERY_PCT=$(grep -o '"battery_percent": *[0-9.]*' /run/battery_monitor/status.json 2>/dev/null | awk '{print $2}' || echo "null")
+fi
+[ -z "$BATTERY_V" ] && BATTERY_V="null"
+[ -z "$BATTERY_PCT" ] && BATTERY_PCT="null"
+
+SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}' | head -n1)
+[ -z "$SSID" ] && SSID="unknown"
+
+TMP_HB=$(mktemp /run/cyberdeck/hb.XXXXXX)
+cat <<EOF > "$TMP_HB"
+{
+  "timestamp": "$NOW_TS",
+  "epoch": $NOW_EPOCH,
+  "ip_address": "${WLAN_IP:-none}",
+  "gateway": "${DEFAULT_GW:-none}",
+  "ssid": "$SSID",
+  "ping_ok": $( [ $PING_SUCCESS -eq 1 ] && echo "true" || echo "false" ),
+  "fail_count": $FAIL_COUNT,
+  "fail_duration_seconds": $FAIL_DURATION_S,
+  "escalation_tier": $LAST_TIER,
+  "battery_voltage_v": $BATTERY_V,
+  "battery_percent": $BATTERY_PCT
+}
+EOF
+
+chmod 0644 "$TMP_HB"
+mv "$TMP_HB" "$HEARTBEAT_RUN"
+if [ -n "$WLAN_IP" ] && [ "$WLAN_IP" != "none" ]; then
+    cp "$HEARTBEAT_RUN" "$HEARTBEAT_PERSIST" 2>/dev/null || true
+fi

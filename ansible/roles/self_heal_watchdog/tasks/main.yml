@@ -1,0 +1,99 @@
+---
+# Tasks for self_heal_watchdog role
+# Implements fake-hwclock persistence, network self-healing timer, and hardware watchdog config.
+
+# --- 1. Fake-HWClock Persistence -------------------------------------------
+- name: Install fake-hwclock package
+  ansible.builtin.apt:
+    name: fake-hwclock
+    state: present
+
+- name: Ensure fake-hwclock-save timer is enabled and active
+  ansible.builtin.systemd:
+    name: fake-hwclock-save.timer
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Ensure fake-hwclock-load service is enabled
+  ansible.builtin.systemd:
+    name: fake-hwclock-load.service
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Save current monotonic clock state via fake-hwclock
+  ansible.builtin.command:
+    cmd: "fake-hwclock save"
+  changed_when: false
+  when: not ansible_check_mode
+
+# --- 2. Hardware Watchdog Supervision -------------------------------------
+- name: Ensure systemd system.conf.d directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy systemd hardware watchdog drop-in configuration
+  ansible.builtin.template:
+    src: 00-watchdog.conf.j2
+    dest: /etc/systemd/system.conf.d/00-watchdog.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: watchdog_config
+
+- name: Reload systemd daemon if watchdog configuration changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: watchdog_config.changed
+
+# --- 3. Network Self-Healing & Heartbeat -----------------------------------
+- name: Ensure whiskerframe state directory exists
+  ansible.builtin.file:
+    path: /var/lib/whiskerframe
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy network self-healing and heartbeat script
+  ansible.builtin.template:
+    src: cyberdeck-net-heal.sh.j2
+    dest: /usr/local/bin/cyberdeck-net-heal.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy cyberdeck network self-healing systemd service unit
+  ansible.builtin.template:
+    src: cyberdeck-net-heal.service.j2
+    dest: /etc/systemd/system/cyberdeck-net-heal.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy cyberdeck network self-healing systemd timer unit
+  ansible.builtin.template:
+    src: cyberdeck-net-heal.timer.j2
+    dest: /etc/systemd/system/cyberdeck-net-heal.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: net_heal_timer_unit
+
+- name: Reload systemd daemon and enable cyberdeck-net-heal timer
+  ansible.builtin.systemd:
+    name: cyberdeck-net-heal.timer
+    daemon_reload: "{{ net_heal_timer_unit.changed }}"
+    enabled: true
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Run initial network self-heal pass to establish baseline heartbeat
+  ansible.builtin.command:
+    cmd: "/usr/local/bin/cyberdeck-net-heal.sh"
+  changed_when: false
+  when: not ansible_check_mode

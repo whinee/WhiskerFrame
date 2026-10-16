@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release-candidate:
+    name: Validate Release Candidate Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install full test requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pytest hypothesis pydantic pillow build
+
+      - name: Verify pyproject.toml version matches Git tag
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/v}"
+          PYPROJECT_VER=$(grep '^version = ' pyproject.toml | head -n1 | cut -d'"' -f2)
+          echo "Git Tag Version: $TAG_NAME"
+          echo "pyproject.toml:  $PYPROJECT_VER"
+          if [ "$TAG_NAME" != "$PYPROJECT_VER" ]; then
+            echo "ERROR: Tag version ($TAG_NAME) does not match pyproject.toml ($PYPROJECT_VER)" >&2
+            exit 1
+          fi
+
+      - name: Gate 1 - Lint & Static Analysis
+        run: |
+          ruff check whiskerframe/
+          ruff format --check whiskerframe/
+          mypy whiskerframe
+
+      - name: Gate 2 - Unit & Property Tests
+        run: pytest -v
+
+      - name: Gate 3 - Security Audit Suite
+        run: python scripts/verify_security_audit.py
+
+      - name: Gate 4 - Typography & Transport Benchmarks
+        run: |
+          python scripts/verify_comic_mono_fonts.py
+          python scripts/benchmark_transport.py
+
+      - name: Gate 5 - Master Acceptance Test Suite (ATP-01..13)
+        run: python scripts/run_all_acceptance_tests.py
+
+      - name: Gate 6 - Firmware Artifacts & SHA256 Manifest
+        run: |
+          python scripts/flash_cyd_display_link.py --dry-run
+          cd firmware/dist
+          sha256sum -c checksums.sha256
+
+      - name: Gate 7 - Build Package Distributions
+        run: |
+          pip install build uv
+          uv build || python -m build
+
+      - name: Upload Python Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+  publish-github-release:
+    name: Publish Sovereign GitHub Release
+    needs: validate-release-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Python Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Extract Release Notes from docs/dev/changelog.md
+        id: release_notes
+        run: |
+          python3 -c "
+          from pathlib import Path
+          text = Path('docs/dev/changelog.md').read_text(encoding='utf-8')
+          lines = text.splitlines()
+          body = []
+          capturing = False
+          for line in lines:
+              if line.startswith('## 0.1.0') or line.startswith('## [0.1.0]'):
+                  capturing = True
+                  continue
+              if capturing and line.startswith('## '):
+                  break
+              if capturing:
+                  body.append(line)
+          note = '\n'.join(body).strip()
+          Path('RELEASE_NOTES.md').write_text(note, encoding='utf-8')
+          "
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/*
+            firmware/dist/firmware.bin
+            firmware/dist/bootloader.bin
+            firmware/dist/partitions.bin
+            firmware/dist/checksums.sha256
+            assets/themes/mono-high-contrast.json

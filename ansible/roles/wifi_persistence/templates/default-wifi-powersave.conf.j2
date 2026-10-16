@@ -1,0 +1,4 @@
+# Managed by Ansible: wifi_persistence role
+# Disables Wi-Fi power saving globally to prevent sleep dropouts on brcmfmac.
+[connection]
+wifi.powersave = {{ nm_powersave }}

@@ -1,0 +1,16 @@
+--- a/.config/orca/codex-runtime-home/home/hooks.json
++++ b/.config/orca/codex-runtime-home/home/hooks.json
+@@ -25,6 +25,12 @@
+     "PreToolUse": [
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "/home/lyra/.config/agent-policy/bin/spec-interview-guard",
++            "timeout": 15
+          }
++        ]
++      },
+       {
+         "hooks": [
+           {

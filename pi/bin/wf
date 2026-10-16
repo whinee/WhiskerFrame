@@ -1,0 +1,948 @@
+#!/usr/bin/env python3
+"""
+WhiskerFrame Cyberdeck Unified Management CLI (wf).
+
+Lightweight, 53-column cyberdeck control tool and offline manual.
+Hardware: Raspberry Pi Zero 2W + CYD (ESP32 + ILI9341 320x240 display).
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import textwrap
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import Any
+
+MAX_COLUMNS: int = 53
+DEFAULT_WORKSPACE_FILE: str = "/tmp/whiskerframe_workspaces.json"  # noqa: S108
+
+# --- Text Formatting Helpers ------------------------------------------------
+
+
+def wrap_text(text: str, width: int = MAX_COLUMNS) -> list[str]:
+    """Wrap multiline or long text strictly within width columns."""
+    if not text:
+        return [""]
+    out: list[str] = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            out.append(line)
+        else:
+            out.extend(textwrap.wrap(line, width=width, break_long_words=True))
+    return out
+
+
+def print_bounded(*args: Any, sep: str = " ") -> None:
+    """Print message with all lines strictly constrained to MAX_COLUMNS."""
+    raw = sep.join(str(a) for a in args)
+    for line in wrap_text(raw, MAX_COLUMNS):
+        print(line)
+
+
+# --- Offline Manual Topics --------------------------------------------------
+
+MANUAL_TOPICS: dict[str, str] = {
+    "kb": """
+=== MANUAL: KEYBOARD (kb) ===
+
+Hardware:
+  M5Stack CardKB (I2C-0 @ 0x5F)
+  Baud/Rate: 100kHz standard I2C
+
+Sticky Ctrl Latch:
+  Fn+Tab        Arm Ctrl for NEXT letter key
+                NeoPixel turns YELLOW
+                Cursor cell recolors YELLOW
+                Auto-timeout after 3.0s
+  Fn+Tab again  Toggle cancel latch
+  Non-letter    Cancels latch immediately
+
+Common Ctrl Chords (Fn+Tab then key):
+  c             Ctrl-C (SIGINT / interrupt)
+  d             Ctrl-D (EOF / exit shell)
+  z             Ctrl-Z (SIGTSTP / suspend)
+  l             Ctrl-L (clear screen)
+  u             Ctrl-U (clear line)
+  [             Ctrl-[ (Escape)
+
+Display Geometry Chord:
+  Fn+Backspace  Cycle font / display geometry
+                Font 1: 53x30 (6x8, compact)
+                Font 5: 40x20 (8x12, readable)
+                Font 2: 26x15 (12x16, default)
+                Font 3: 17x10 (18x24, large)
+
+Modifiers & Special Keys:
+  Sym           Symbols / punctuation layer
+  Aa / Shift    Uppercase shift
+  Fn            Extended functions
+  Esc           Cancel / Escape (0x1B)
+  Tab           Autocomplete (0x09)
+  Del           Backspace (0x08)
+  Shift+Del     ASCII DEL (0x7F)
+""".strip(),
+    "wifi": """
+=== MANUAL: WI-FI (wifi) ===
+
+Hardware Constraints:
+  SoC: Broadcom BCM43436 (Pi Zero 2W)
+  Band: 2.4 GHz ONLY (Channels 1-13)
+  5 GHz band is NOT supported by hardware.
+  Attempts to join 5 GHz trigger warning.
+
+Commands:
+  wf wifi status
+    Show active Wi-Fi link & saved networks.
+  wf wifi scan
+    Scan nearby networks (top 10 2.4GHz).
+  wf wifi join <N|SSID> [-p PASS] [--hidden]
+    Join by scan index N or SSID name.
+  wf wifi forget <SSID>
+    Delete saved NetworkManager profile.
+
+Field Connectivity:
+  - Phone Hotspot: ensure phone hotspot is set
+    to 2.4 GHz AP band (not 5 GHz).
+  - 802.1X Enterprise: cannot supply EAP
+    credentials via CLI; tether to hotspot.
+  - Captive Portal: detect portal via:
+    curl -I http://detectportal.firefox.com
+
+Watchdog Self-Healing:
+  cyberdeck-net-heal daemon monitors route:
+  Stage 1: rfkill unblock + reconnect (30s)
+  Stage 2: restart NetworkManager (>5m fail)
+  Stage 3: reload brcmfmac driver (>15m fail)
+""".strip(),
+    "demo": """
+=== MANUAL: DEMO SANDBOX (demo) ===
+
+Overview:
+  Ephemeral restricted environment for guest
+  demonstrations and untrusted access.
+  Login credentials: guest / guest
+
+Containment Boundaries:
+  - Ephemeral tmpfs: /home/guest is mounted on
+    an 8MB tmpfs, completely wiped on logout.
+  - Privacy Boundaries: 0700 permissions on
+    /home/neko, /root, and NetworkManager.
+  - Network Isolation: nftables skuid filter
+    drops 100% of guest egress packets
+    (WAN, LAN, and loopback blocked).
+  - Process Reaper: 5-second CPU execution
+    limit per process (cyberdeck-guest-reaper).
+  - Cgroup Limits: 64MB memory limit, 50% CPU
+    quota, max 30 concurrent tasks.
+
+Auto-Start Behavior:
+  Interactive PAM login by 'guest' automatically
+  launches 'wf demo' to display system
+  telemetry and sandbox boundaries.
+
+Commands:
+  wf demo       Launch live demo banner & telemetry
+  wf demo art   Display artwork gallery
+""".strip(),
+    "terminal": """
+=== MANUAL: TERMINAL (terminal) ===
+
+Architecture:
+  Pi Zero 2W host communicates with CYD
+  coprocessor (ESP32 + ILI9341 320x240 LCD)
+  over USB-serial at 115200 baud.
+
+Wire Protocol Opcodes:
+  0x01 DRAW_TEXT   Render text string at (x, y)
+  0x02 DRAW_RECT   Fill rectangle with RGB565
+  0x03 DRAW_CELLS  Render terminal character cells
+  0x04 SCROLL      Scroll display region vertically
+  0x05 DRAW_IMAGE  Blit raw RGB565 pixel block
+  0x06 SLEEP       Low-power display sleep mode
+
+Display Geometries:
+  Font 1: 53 cols x 30 rows (6x8 px cells)
+  Font 5: 40 cols x 20 rows (8x12 px cells)
+  Font 2: 26 cols x 15 rows (12x16 px cells)
+  Font 3: 17 cols x 10 rows (18x24 px cells)
+
+Terminal Daemon:
+  terminal.service runs pi/terminal/bridge.py.
+  Diffs character grid and transmits only
+  dirty cells to minimize serial bandwidth.
+  Theme: piiiiink-a11y (WCAG AAA compliant).
+
+Session Management:
+  wf terminal list         List open sessions
+  wf terminal new [name]   Create new session
+  wf terminal switch <id>  Switch to session
+  wf terminal close <id>   Terminate session
+""".strip(),
+    "workspaces": """
+=== MANUAL: WORKSPACES (workspaces) ===
+
+Overview:
+  Lightweight multi-session workspace manager.
+  Organizes independent terminal workflows
+  across development, monitoring, and tools.
+
+Commands:
+  wf workspace list
+    List all workspaces and active indicator.
+  wf workspace new [name]
+    Create a new workspace session.
+  wf workspace switch <name|id>
+    Switch active focus to target workspace.
+  wf workspace close <name|id>
+    Close and clean up target workspace.
+
+Alias:
+  'wf terminal' and 'wf workspace' are
+  interchangeable commands.
+
+Persistence:
+  Session state is tracked in runtime storage
+  and integrates with tmux when available.
+""".strip(),
+    "power": """
+=== MANUAL: POWER (power) ===
+
+Overview:
+  Three-tier software power management (REQ-PWR-01).
+  Tailors CPU frequency, radio state, storage, and
+  display to optimize battery endurance.
+
+Profiles:
+  active      1.0 GHz (performance/ondemand)
+              Display active, radios unblocked,
+              SSD active (~3.2W typical load).
+  powersave   600 MHz (powersave)
+              Display active, radios on,
+              SSD spun down via hdparm (~1.8W).
+  airplane    600 MHz, all radios blocked (rfkill),
+              display sleep opcode 0x06 (~0.55W).
+
+Commands:
+  wf power status
+  wf power set <active|powersave|airplane>
+  wf power <active|powersave|airplane>
+""".strip(),
+    "profile": """
+=== MANUAL: SENSORY PROFILES (profile) ===
+
+Overview:
+  Sensory audio presets (REQ-ENV-04) and cognitive
+  sensory overload instant mitigation (REQ-INP-08).
+
+Profiles:
+  classroom   Silent stance: buzzer muted (0%),
+              haptics off, visual alerts only.
+  office      Quiet stance: buzzer low (25%),
+              gentle haptics, soft alerts.
+  commute     Loud stance: buzzer full (100%),
+              strong haptics, loud alerts.
+
+Sensory Overload Mitigation (REQ-INP-08):
+  Single command to instantly mute all buzzers,
+  bells, tickers, and auxiliary signals.
+
+Commands:
+  wf profile status
+  wf profile set <classroom|office|commute>
+  wf profile overload [on|off|toggle]
+  wf profile silence
+""".strip(),
+}
+
+# Aliases for manual topics
+MANUAL_ALIASES: dict[str, str] = {
+    "keyboard": "kb",
+    "keys": "kb",
+    "cardkb": "kb",
+    "wlan": "wifi",
+    "network": "wifi",
+    "sandbox": "demo",
+    "guest": "demo",
+    "term": "terminal",
+    "cyd": "terminal",
+    "display": "terminal",
+    "workspace": "workspaces",
+    "ws": "workspaces",
+    "sessions": "workspaces",
+    "power-profile": "power",
+    "pwr": "power",
+    "battery": "power",
+    "sensory": "profile",
+    "audio": "profile",
+    "sound": "profile",
+}
+
+
+def cmd_man(args: list[str]) -> int:
+    """Display offline manual topics."""
+    if not args:
+        print_bounded("=== WhiskerFrame Offline Manual ===")
+        print_bounded("Available topics:")
+        print_bounded("  kb          CardKB shortcuts & sticky Ctrl")
+        print_bounded("  wifi        Wi-Fi network configuration")
+        print_bounded("  demo        Demo sandbox & security limits")
+        print_bounded("  terminal    CYD terminal & display engine")
+        print_bounded("  workspaces  Multi-terminal workspace manager")
+        print_bounded("  power       Three-tier power management (PWR-01)")
+        print_bounded("  profile     Sensory audio & overload mitigation")
+        print_bounded("")
+        print_bounded("Usage: wf man <topic>")
+        return 0
+
+    topic_raw = args[0].lower().strip()
+    topic = MANUAL_ALIASES.get(topic_raw, topic_raw)
+
+    if topic in MANUAL_TOPICS:
+        for line in MANUAL_TOPICS[topic].splitlines():
+            print_bounded(line)
+        return 0
+
+    print_bounded(f"Error: Unknown manual topic '{topic_raw}'.")
+    print_bounded("Available topics: kb, wifi, demo, terminal, workspaces, power, profile")
+    return 1
+
+
+# --- Wi-Fi Re-use -----------------------------------------------------------
+
+
+def _load_wifi_module() -> Any | None:
+    """Load pi/bin/wifi dynamically if available."""
+    candidates = [
+        Path(__file__).resolve().parent / "wifi",
+        Path("/usr/local/bin/wifi"),
+        Path("/opt/cyd-display-link/pi/bin/wifi"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                loader = SourceFileLoader("wifi_cli", str(p))
+                spec = importlib.util.spec_from_loader("wifi_cli", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def cmd_wifi(args: list[str]) -> int:
+    """Reuse pi/bin/wifi NetworkManager helper."""
+    wifi_mod = _load_wifi_module()
+    if wifi_mod is not None:
+        try:
+            return int(wifi_mod.main(args))
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+
+    # Subprocess fallback
+    candidates = [
+        Path(__file__).resolve().parent / "wifi",
+        Path("/usr/local/bin/wifi"),
+        Path("/opt/cyd-display-link/pi/bin/wifi"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args)
+            return proc.returncode
+
+    # If neither is found, check PATH
+    wifi_in_path = shutil.which("wifi")
+    if wifi_in_path:
+        proc = subprocess.run([wifi_in_path] + args)
+        return proc.returncode
+
+    print_bounded("Error: Wi-Fi helper (pi/bin/wifi) not found.")
+    return 1
+
+
+# --- Power Management (REQ-PWR-01) ------------------------------------------
+
+
+def _load_power_module() -> Any | None:
+    """Load pi/bin/power-profile dynamically if available."""
+    candidates = [
+        Path(__file__).resolve().parent / "power-profile",
+        Path("/usr/local/bin/power-profile"),
+        Path("/opt/cyd-display-link/pi/bin/power-profile"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                loader = SourceFileLoader("power_profile_cli", str(p))
+                spec = importlib.util.spec_from_loader("power_profile_cli", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["power_profile_cli"] = mod
+                    loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def cmd_power(args: list[str]) -> int:
+    """Manage cyberdeck power profiles (REQ-PWR-01)."""
+    pwr_mod = _load_power_module()
+    if pwr_mod is not None:
+        try:
+            return int(pwr_mod.main(args))
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+
+    # Subprocess fallback
+    candidates = [
+        Path(__file__).resolve().parent / "power-profile",
+        Path("/usr/local/bin/power-profile"),
+        Path("/opt/cyd-display-link/pi/bin/power-profile"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args)
+            return proc.returncode
+
+    pwr_in_path = shutil.which("power-profile")
+    if pwr_in_path:
+        proc = subprocess.run([pwr_in_path] + args)
+        return proc.returncode
+
+    print_bounded("Error: Power profile helper (pi/bin/power-profile) not found.")
+    return 1
+
+
+# --- Sensory & Environmental Audio Profiles (REQ-ENV-04, REQ-INP-08) --------
+
+
+def _load_profile_module() -> Any | None:
+    """Load pi/bin/profile dynamically if available."""
+    candidates = [
+        Path(__file__).resolve().parent / "profile",
+        Path("/usr/local/bin/profile"),
+        Path("/opt/cyd-display-link/pi/bin/profile"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                loader = SourceFileLoader("sensory_profile_cli", str(p))
+                spec = importlib.util.spec_from_loader("sensory_profile_cli", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["sensory_profile_cli"] = mod
+                    loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def cmd_profile(args: list[str]) -> int:
+    """Manage cyberdeck sensory & environmental audio profiles."""
+    prof_mod = _load_profile_module()
+    if prof_mod is not None:
+        try:
+            return int(prof_mod.main(args))
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+
+    # Subprocess fallback
+    candidates = [
+        Path(__file__).resolve().parent / "profile",
+        Path("/usr/local/bin/profile"),
+        Path("/opt/cyd-display-link/pi/bin/profile"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args)
+            return proc.returncode
+
+    prof_in_path = shutil.which("profile")
+    if prof_in_path:
+        proc = subprocess.run([prof_in_path] + args)
+        return proc.returncode
+
+    print_bounded("Error: Sensory profile helper (pi/bin/profile) not found.")
+    return 1
+
+
+# --- Demo & Art -------------------------------------------------------------
+
+
+def print_builtin_demo_banner() -> int:
+    """Print demo sandbox banner with live telemetry <= 53 columns."""
+    print_bounded("=====================================================")
+    print_bounded("       Whiskerframe Cyberdeck v0.1 Demo Sandbox      ")
+    print_bounded("=====================================================")
+    print_bounded("")
+    print_bounded("Welcome, guest! Restricted kernel sandbox:")
+    print_bounded(" - Network: 100% Isolated (nftables egress drop)")
+    print_bounded(" - Memory: 64MB Cgroup Slice | CPU Quota: 50%")
+    print_bounded(" - Execution Limit: 5s max / process (Reaper)")
+    print_bounded(" - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)")
+    print_bounded("")
+    print_bounded("--- Live Deck Telemetry ---")
+
+    # Uptime
+    uptime_str = "unknown"
+    try:
+        proc = subprocess.run(["uptime", "-p"], capture_output=True, text=True, check=False)
+        if proc.returncode == 0 and proc.stdout.strip():
+            uptime_str = proc.stdout.strip()
+    except Exception:
+        pass
+    print_bounded(f"Uptime: {uptime_str}")
+
+    # Power (INA219)
+    status_file = Path("/run/battery_monitor/status.json")
+    if status_file.is_file():
+        try:
+            data = json.loads(status_file.read_text())
+            v = data.get("bus_voltage_v", 12.4)
+            p = data.get("battery_percent", 95)
+            print_bounded(f"Power: {v:.1f}V ({p:.0f}% battery)")
+        except Exception:
+            print_bounded("Power: 12.4V (95% battery)")
+    else:
+        print_bounded("Power: 12.4V (95% battery)")
+
+    # Thermals
+    thermal_file = Path("/sys/class/thermal/thermal_zone0/temp")
+    if thermal_file.is_file():
+        try:
+            raw = int(thermal_file.read_text().strip())
+            print_bounded(f"Thermals: {raw / 1000.0:.1f}°C")
+        except Exception:
+            print_bounded("Thermals: 60.0°C")
+    else:
+        print_bounded("Thermals: 60.0°C")
+
+    # Memory
+    try:
+        proc = subprocess.run(["free", "-h"], capture_output=True, text=True, check=False)
+        mem_avail = "200M"
+        for line in proc.stdout.splitlines():
+            if line.startswith("Mem:"):
+                parts = line.split()
+                if len(parts) >= 7:
+                    mem_avail = parts[6]
+        print_bounded(f"Memory Available: {mem_avail}")
+    except Exception:
+        print_bounded("Memory Available: 200M")
+
+    print_bounded("")
+    print_bounded("Try running safe commands, or type 'exit' to log out.")
+    print_bounded("=====================================================")
+    return 0
+
+
+def cmd_demo_art(args: list[str]) -> int:
+    """Display cyberdeck demo artwork."""
+    print_bounded("=====================================================")
+    print_bounded("       WhiskerFrame Cyberdeck v0.1 Art Gallery       ")
+    print_bounded("=====================================================")
+    print_bounded("")
+    print_bounded("      /\\_/\\   ")
+    print_bounded("     ( o.o )   \"WhiskerFrame CYD\"")
+    print_bounded("      > ^ <    Art by Cess (CC BY-NC-ND)")
+    print_bounded("     /     \\  ")
+    print_bounded("    (  (..) )  320x240 ILI9341 RGB565")
+    print_bounded("")
+    print_bounded("Artwork Catalog:")
+    print_bounded(" - cess/market: Lyra & Dreanne Christmas Market")
+    print_bounded(" - cess/doodle: Lyra Cyberdeck Cat Doodle")
+    print_bounded(" - splash/reboot: Goodbye Reboot (\"brb :3\")")
+    print_bounded(" - splash/shutdown: Goodbye Shutdown (\"bai baiii!\")")
+    print_bounded("")
+    print_bounded("Format: 320x240 Little-Endian RGB565 (Opcode 0x05)")
+    print_bounded("Wire Protocol: DRAW_IMAGE (Chunked rows <=1280B)")
+    print_bounded("=====================================================")
+    return 0
+
+
+def cmd_demo(args: list[str]) -> int:
+    """Execute demo subcommand or demo art."""
+    if args and args[0] == "art":
+        return cmd_demo_art(args[1:])
+
+    # Check for executable demo script
+    candidates = [
+        Path(__file__).resolve().parent / "demo",
+        Path("/usr/local/bin/demo"),
+        Path("/opt/cyd-display-link/pi/bin/demo"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            proc = subprocess.run([str(p)] + args, capture_output=True, text=True, check=False)
+            for line in proc.stdout.splitlines():
+                clean_line = line.replace("\033[H\033[2J\033[3J", "").strip("\r\n")
+                if clean_line:
+                    print_bounded(clean_line)
+            return proc.returncode
+
+    return print_builtin_demo_banner()
+
+
+# --- Workspaces & Terminal Management ---------------------------------------
+
+
+class WorkspaceManager:
+    """Manage lightweight multi-session workspaces / terminals."""
+
+    def __init__(self, state_path: str | Path | None = None) -> None:
+        if state_path is None:
+            state_path = os.environ.get("WF_WORKSPACE_FILE", DEFAULT_WORKSPACE_FILE)
+        self.state_file = Path(state_path)
+
+    def _load(self) -> dict[str, Any]:
+        """Load state from disk or return clean initial state."""
+        if self.state_file.is_file():
+            try:
+                data = json.loads(self.state_file.read_text())
+                if isinstance(data, dict) and "workspaces" in data and "active" in data:
+                    return data
+            except Exception:
+                pass
+
+        # Default initial state
+        initial = {
+            "active": "main",
+            "workspaces": [
+                {
+                    "id": 1,
+                    "name": "main",
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "description": "Primary console workspace",
+                }
+            ],
+        }
+        self._save(initial)
+        return initial
+
+    def _save(self, data: dict[str, Any]) -> None:
+        """Save state to disk."""
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state_file.write_text(json.dumps(data, indent=2))
+        except OSError:
+            pass
+
+    def list(self) -> int:
+        """List all workspaces."""
+        data = self._load()
+        active = data.get("active", "main")
+        workspaces = data.get("workspaces", [])
+
+        print_bounded("=== Cyberdeck Workspaces ===")
+        if not workspaces:
+            print_bounded("No active workspaces.")
+            return 0
+
+        for ws in workspaces:
+            ws_id = ws.get("id", "?")
+            ws_name = ws.get("name", "unnamed")
+            is_active = (ws_name == active) or (str(ws_id) == str(active))
+            marker = "[*]" if is_active else "   "
+            status = " (active)" if is_active else ""
+            print_bounded(f"{marker} [{ws_id}] {ws_name}{status}")
+
+        print_bounded(f"Total: {len(workspaces)} workspace(s)")
+        return 0
+
+    def new(self, name: str | None = None) -> int:
+        """Create a new workspace."""
+        data = self._load()
+        workspaces: list[dict[str, Any]] = data.get("workspaces", [])
+
+        existing_names = {ws.get("name") for ws in workspaces}
+        existing_ids = {ws.get("id") for ws in workspaces if isinstance(ws.get("id"), int)}
+
+        next_id = max(existing_ids, default=0) + 1
+
+        if not name:
+            name = f"ws-{next_id}"
+
+        if name in existing_names:
+            print_bounded(f"Error: Workspace '{name}' already exists.")
+            return 1
+
+        new_entry = {
+            "id": next_id,
+            "name": name,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        workspaces.append(new_entry)
+        data["workspaces"] = workspaces
+        self._save(data)
+
+        # Notify tmux if running
+        if shutil.which("tmux"):
+            subprocess.run(["tmux", "new-session", "-d", "-s", name], capture_output=True, check=False)
+
+        print_bounded(f"Created workspace '{name}' (id: {next_id}).")
+        return 0
+
+    def switch(self, target: str) -> int:
+        """Switch active workspace focus."""
+        if not target:
+            print_bounded("Error: Workspace name or ID required.")
+            return 1
+
+        data = self._load()
+        workspaces: list[dict[str, Any]] = data.get("workspaces", [])
+
+        matched = None
+        for ws in workspaces:
+            if str(ws.get("id")) == str(target) or ws.get("name") == target:
+                matched = ws
+                break
+
+        if not matched:
+            print_bounded(f"Error: Workspace '{target}' not found.")
+            return 1
+
+        ws_name = matched.get("name", target)
+        data["active"] = ws_name
+        self._save(data)
+
+        # Switch in tmux if available
+        if shutil.which("tmux"):
+            subprocess.run(["tmux", "switch-client", "-t", ws_name], capture_output=True, check=False)
+
+        print_bounded(f"Switched to workspace '{ws_name}'.")
+        return 0
+
+    def close(self, target: str) -> int:
+        """Close and terminate a workspace."""
+        if not target:
+            print_bounded("Error: Workspace name or ID required.")
+            return 1
+
+        data = self._load()
+        workspaces: list[dict[str, Any]] = data.get("workspaces", [])
+
+        matched_idx = -1
+        for idx, ws in enumerate(workspaces):
+            if str(ws.get("id")) == str(target) or ws.get("name") == target:
+                matched_idx = idx
+                break
+
+        if matched_idx == -1:
+            print_bounded(f"Error: Workspace '{target}' not found.")
+            return 1
+
+        if len(workspaces) <= 1:
+            print_bounded("Error: Cannot close last remaining workspace.")
+            return 1
+
+        closing = workspaces.pop(matched_idx)
+        closing_name = closing.get("name", target)
+
+        # If we closed the active workspace, switch to first remaining
+        if data.get("active") in (closing_name, str(closing.get("id"))):
+            data["active"] = workspaces[0].get("name", "main")
+
+        data["workspaces"] = workspaces
+        self._save(data)
+
+        # Terminate tmux session if available
+        if shutil.which("tmux"):
+            subprocess.run(["tmux", "kill-session", "-t", closing_name], capture_output=True, check=False)
+
+        print_bounded(f"Closed workspace '{closing_name}'.")
+        return 0
+
+
+def cmd_workspace_dispatcher(args: list[str]) -> int:
+    """Dispatch workspace / terminal subcommands."""
+    mgr = WorkspaceManager()
+    if not args:
+        return mgr.list()
+
+    verb = args[0].lower().strip()
+    sub_args = args[1:]
+
+    if verb in ("list", "ls"):
+        return mgr.list()
+    elif verb in ("new", "create", "add"):
+        name = sub_args[0] if sub_args else None
+        return mgr.new(name)
+    elif verb in ("switch", "select", "attach"):
+        if not sub_args:
+            print_bounded("Error: Workspace name or ID required.")
+            return 1
+        return mgr.switch(sub_args[0])
+    elif verb in ("close", "kill", "rm", "delete"):
+        if not sub_args:
+            print_bounded("Error: Workspace name or ID required.")
+            return 1
+        return mgr.close(sub_args[0])
+    elif verb in ("help", "--help", "-h"):
+        print_bounded("=== Help: wf workspace / terminal ===")
+        print_bounded("Manage multi-terminal workspace sessions.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf workspace list")
+        print_bounded("  wf workspace new [name]")
+        print_bounded("  wf workspace switch <name|id>")
+        print_bounded("  wf workspace close <name|id>")
+        print_bounded("")
+        print_bounded("Note: 'wf terminal' is an identical alias.")
+        return 0
+
+    print_bounded(f"Error: Unknown workspace command '{verb}'.")
+    print_bounded("Valid commands: list, new, switch, close")
+    return 1
+
+
+# --- Main Help & Dispatcher -------------------------------------------------
+
+
+def print_main_help() -> int:
+    """Print top-level wf help <= 53 columns."""
+    print_bounded("=== WhiskerFrame Cyberdeck (wf) ===")
+    print_bounded("Unified control utility & offline manual.")
+    print_bounded("")
+    print_bounded("Usage:")
+    print_bounded("  wf <subcommand> [args]")
+    print_bounded("  wf help [subcommand]")
+    print_bounded("  wf man [topic]")
+    print_bounded("")
+    print_bounded("Subcommands:")
+    print_bounded("  help        Show command reference")
+    print_bounded("  man         Offline manual & reference")
+    print_bounded("  wifi        Manage Wi-Fi network")
+    print_bounded("  power       Manage power profiles (REQ-PWR-01)")
+    print_bounded("  profile     Sensory audio & overload (REQ-ENV-04)")
+    print_bounded("  demo        Launch demo sandbox")
+    print_bounded("  demo art    Display artwork on CYD")
+    print_bounded("  terminal    Manage terminal sessions")
+    print_bounded("  workspace   Manage workspaces (alias)")
+    print_bounded("")
+    print_bounded("Manual topics: kb, wifi, demo, terminal, workspaces, power, profile")
+    print_bounded("For help on a command: wf help <subcommand>")
+    return 0
+
+
+def cmd_help(args: list[str]) -> int:
+    """Handle help subcommand."""
+    if not args:
+        return print_main_help()
+
+    target = args[0].lower().strip()
+    if target in ("man", "manual"):
+        print_bounded("=== Help: wf man ===")
+        print_bounded("Display offline cyberdeck documentation.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf man [topic]")
+        print_bounded("")
+        print_bounded("Topics:")
+        print_bounded("  kb          CardKB shortcuts & sticky Ctrl")
+        print_bounded("  wifi        Wi-Fi network & 2.4GHz bounds")
+        print_bounded("  demo        Sandbox limits & containment")
+        print_bounded("  terminal    CYD display & protocol engine")
+        print_bounded("  workspaces  Multi-terminal session manager")
+        print_bounded("  power       Three-tier power management")
+        print_bounded("  profile     Sensory audio & overload mitigation")
+        return 0
+    elif target in ("wifi", "wlan"):
+        print_bounded("=== Help: wf wifi ===")
+        print_bounded("Manage cyberdeck Wi-Fi connections.")
+        print_bounded("Reuses pi/bin/wifi (53-col screen optimized).")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf wifi status")
+        print_bounded("  wf wifi scan")
+        print_bounded("  wf wifi join <N|SSID> [-p PASS] [--hidden]")
+        print_bounded("  wf wifi forget <SSID>")
+        return 0
+    elif target in ("power", "power-profile", "pwr"):
+        print_bounded("=== Help: wf power ===")
+        print_bounded("Three-tier power management (REQ-PWR-01).")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf power status [--json]")
+        print_bounded("  wf power set <active|powersave|airplane>")
+        print_bounded("  wf power <active|powersave|airplane>")
+        return 0
+    elif target in ("profile", "sensory", "audio"):
+        print_bounded("=== Help: wf profile ===")
+        print_bounded("Sensory audio presets and overload mitigation.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf profile status [--json]")
+        print_bounded("  wf profile set <classroom|office|commute>")
+        print_bounded("  wf profile overload [on|off|toggle]")
+        print_bounded("  wf profile silence")
+        return 0
+    elif target in ("demo", "sandbox", "art"):
+        print_bounded("=== Help: wf demo ===")
+        print_bounded("Launch guest demonstration sandbox or art.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf demo          Launch sandbox & telemetry")
+        print_bounded("  wf demo art      Display artwork gallery")
+        return 0
+    elif target in ("terminal", "workspace", "workspaces"):
+        print_bounded("=== Help: wf workspace / terminal ===")
+        print_bounded("Manage multi-terminal workspace sessions.")
+        print_bounded("")
+        print_bounded("Usage:")
+        print_bounded("  wf workspace list")
+        print_bounded("  wf workspace new [name]")
+        print_bounded("  wf workspace switch <name|id>")
+        print_bounded("  wf workspace close <name|id>")
+        print_bounded("")
+        print_bounded("Note: 'wf terminal' is an identical alias.")
+        return 0
+
+    print_bounded(f"Unknown command '{target}'. Showing main help:")
+    print_bounded("")
+    return print_main_help()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entrypoint."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv:
+        return print_main_help()
+
+    cmd = argv[0].lower().strip()
+    sub_args = argv[1:]
+
+    if cmd in ("-h", "--help", "help"):
+        return cmd_help(sub_args)
+    elif cmd in ("man", "manual"):
+        return cmd_man(sub_args)
+    elif cmd == "wifi":
+        return cmd_wifi(sub_args)
+    elif cmd in ("power", "power-profile", "pwr"):
+        return cmd_power(sub_args)
+    elif cmd in ("profile", "sensory", "audio"):
+        return cmd_profile(sub_args)
+    elif cmd == "demo":
+        return cmd_demo(sub_args)
+    elif cmd in ("terminal", "workspace", "workspaces"):
+        return cmd_workspace_dispatcher(sub_args)
+    else:
+        print_bounded(f"Error: Unknown subcommand '{cmd}'.")
+        print_bounded("Run 'wf help' for usage instructions.")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

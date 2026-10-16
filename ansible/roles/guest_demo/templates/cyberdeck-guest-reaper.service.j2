@@ -1,0 +1,14 @@
+[Unit]
+Description=Whiskerframe Cyberdeck Guest Process Reaper (5s limit)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cyberdeck-guest-reaper.sh
+Restart=always
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

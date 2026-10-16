@@ -19,8 +19,9 @@ Field-robustness is the top priority: every I/O surface (serial, PTY, CardKB) is
 wrapped so a transient error reopens the resource with bounded backoff instead of
 crashing the loop; the login screen is the safe idle state; a dead or exited
 shell returns to login and NEVER auto-respawns a root shell; and a periodic
-keyframe full-repaint recovers a CYD that reset mid-session. There are no
-interactive prompts in the deployed path.
+diff-gated keyframe repaint corrects any on-device drift without transmitting
+anything while the screen is idle. There are no interactive prompts in the
+deployed path.
 """
 
 from __future__ import annotations
@@ -29,13 +30,15 @@ import errno
 import fcntl
 import os
 import pty
+import queue
 import select
 import signal
 import struct
 import termios
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from whiskerframe.metrics import FONT_METRICS
 from whiskerframe.models import DrawRect
@@ -52,8 +55,17 @@ from .debug import tracepoint
 from .grid import Grid
 from .login import LoginState, SubmitEvent, authenticate
 from .login_view import render_login
+from .status_bar import StatusBar
 from .theme import Theme, load_theme
 from .vt import VTEmulator
+from .workspaces import (
+    DEFAULT_MAX_WORKSPACES,
+    WORKSPACE_DIRECT_CHORDS,
+    WORKSPACE_NEXT_CHORD,
+    WORKSPACE_PREV_CHORD,
+    Workspace,
+    WorkspaceManager,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -61,24 +73,53 @@ if TYPE_CHECKING:
     from .grid import CellRun
 
 __all__ = [
+    "CTRL_LATCH_CHORD",
+    "CTRL_LATCH_CHORDS",
+    "CTRL_LATCH_TIMEOUT_S",
+    "DEFAULT_MAX_WORKSPACES",
     "RESIZE_CHORD",
+    "RESIZE_CHORDS",
     "RESIZE_SIZES",
+    "WORKSPACE_DIRECT_CHORDS",
+    "WORKSPACE_NEXT_CHORD",
+    "WORKSPACE_PREV_CHORD",
     "BridgeConfig",
+    "KeyQueue",
+    "StatusBar",
     "TerminalBridge",
+    "Workspace",
+    "WorkspaceManager",
 ]
 
-RESIZE_CHORD: int = 0x1D
-"""CardKB byte that cycles the font size at the login/shell boundary (Ctrl+``]``).
+CTRL_LATCH_CHORD: int = 0x8C
+CTRL_LATCH_CHORDS: frozenset[int] = frozenset({0x8C})
+"""CardKB bytes that latch the Ctrl modifier for the next key: Fn+Tab (0x8C / 140)."""
 
-``Ctrl+]`` (ASCII GS, ``0x1D``) is the chosen resize chord: it is virtually never
-typed in an interactive shell (it is the classic telnet escape, not a shell
-editing key), so intercepting it costs no normal functionality. Pressing it in a
-shell cycles the font size through :data:`RESIZE_SIZES`; it is ignored during
-login so a resize can never disturb password entry.
+CTRL_LATCH_TIMEOUT_S: float = 3.0
+"""Window in seconds before an armed Ctrl modifier latch times out."""
+
+_CTRL_VALID_CHARS: frozenset[int] = frozenset(
+    # a-z (0x61-0x7A)
+    set(range(ord("a"), ord("z") + 1))
+    # A-Z (0x41-0x5A)
+    | set(range(ord("A"), ord("Z") + 1))
+    # @ (0x40), [ (0x5B), \ (0x5C), ] (0x5D), ^ (0x5E), _ (0x5F), space (0x20)
+    | {ord("@"), ord("["), ord("\\"), ord("]"), ord("^"), ord("_"), ord(" ")},
+)
+"""Keys that accept the Ctrl latch modifier, emitted as `char & 0x1F`."""
+
+RESIZE_CHORD: int = 0x8B
+RESIZE_CHORDS: frozenset[int] = frozenset({0x8B})
+"""CardKB bytes that cycle the font size: Fn+Del (0x8B / 139).
+
+The M5Stack CardKB v1.1 has no Ctrl key, so the old Ctrl+``]`` (0x1D) chord was
+unreachable, as were 0x88/0xEF. Per the firmware keymap (CardKeyBoard.ino) the
+Fn layer maps Del to 139 (0x8B); it is on the Fn layer so it never collides with
+a shell keystroke, and unlike Shift+Del (0x7F) it does not alias Backspace.
 """
 
-RESIZE_SIZES: tuple[int, ...] = (1, 2, 3)
-"""Font sizes the resize chord cycles through (grid 53x30 / 26x15 / 17x10)."""
+RESIZE_SIZES: tuple[int, ...] = (1, 5, 2, 3)
+"""Font sizes the resize chord cycles through (grid 53x30 / 40x20 / 26x15 / 17x10)."""
 
 _SERIAL_BACKOFF_START_S: float = 0.5
 _SERIAL_BACKOFF_MAX_S: float = 5.0
@@ -86,6 +127,81 @@ _POLL_TIMEOUT_S: float = 0.05
 _PTY_READ_BYTES: int = 4096
 _DEFAULT_FONT_SIZE: int = 2
 _DEFAULT_KEYFRAME_S: float = 30.0
+_SHELL_STARTUP_MAX_S: float = 3.0
+"""Hard ceiling on draining a new shell's startup output before the first paint."""
+_SHELL_STARTUP_QUIET_S: float = 0.4
+"""PTY idle gap that marks shell startup output as settled."""
+
+_KEY_UP: int = 0xB5
+_KEY_DOWN: int = 0xB6
+_KEY_LEFT: int = 0xB4
+_KEY_RIGHT: int = 0xB7
+
+_KEY_TRANSLATIONS: dict[int, bytes] = {
+    _KEY_UP: b"\x1b[A",
+    _KEY_DOWN: b"\x1b[B",
+    _KEY_RIGHT: b"\x1b[C",
+    _KEY_LEFT: b"\x1b[D",
+    0x0D: b"\r",
+}
+
+
+class KeyQueue:
+    """
+    Non-blocking queue adapter over a CardKB key iterator.
+
+    Buffer keys yielded by the poll-backed `CardKB.robust_keys()` generator in a
+    background worker thread so the shell session pump loop can drain pending
+    keys non-blocking without freezing PTY output processing.
+    """
+
+    def __init__(self, keys: Iterator[int]) -> None:
+        """
+        Initialize the queue and start the background key reading thread.
+
+        Args:
+        - keys (`Iterator[int]`): The CardKB key iterator to drain.
+
+        """
+        self._keys = keys
+        self._queue: queue.Queue[int | None] = queue.Queue()
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def _worker(self) -> None:
+        """
+        Background worker draining `keys` into the queue until iteration ends.
+
+        Returns:
+        `None`: Puts `None` as an EOF sentinel on termination.
+
+        """
+        for key in self._keys:
+            self._queue.put(key)
+        self._queue.put(None)
+
+    def get_blocking(self) -> int | None:
+        """
+        Pop the next key from the queue, blocking until available.
+
+        Returns:
+        `int | None`: The pressed key byte, or `None` on EOF.
+
+        """
+        return self._queue.get()
+
+    def get_nowait(self) -> int | None:
+        """
+        Pop the next key from the queue non-blocking.
+
+        Returns:
+        `int | None`: The pressed key byte if pending, or `None` if empty/EOF.
+
+        """
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
 
 
 @dataclass
@@ -119,6 +235,9 @@ class BridgeConfig:
     password_mask: str = "*"  # noqa: S105 - a display mask glyph, not a secret
     splash_rgb565: str = ""
     theme: Theme = field(default_factory=load_theme)
+    demo_mode: bool = False
+    status_bar_enabled: bool = True
+    status_bar_position: str = "top"
 
 
 def _tiocswinsz(fd: int, geometry: TerminalGeometry) -> None:
@@ -162,21 +281,39 @@ class TerminalBridge:
     the daemon never auto-respawns a shell without a fresh authenticated login.
     """
 
-    def __init__(self, config: BridgeConfig) -> None:
+    def __init__(self, config: BridgeConfig, cardkb: Any | None = None) -> None:
         """
         Initialize the bridge from resolved configuration (opens no hardware).
 
         Args:
         - config (`BridgeConfig`): The resolved bridge configuration.
+        - cardkb (`Any | None`, optional): Optional CardKB reader instance for LED feedback.
 
         """
         self._config = config
         self._theme: Theme = config.theme
+        os.environ["TERM"] = "xterm"
         self._font_size = self._valid_font_size(config.font_size)
         self._geometry = TerminalGeometry.for_font_size(self._font_size)
         self._transport: SerialTransport | None = None
         self._serial_backoff = _SERIAL_BACKOFF_START_S
         self._prev: Grid | None = None
+        self._cardkb = cardkb
+
+    def set_ctrl_led(self, armed: bool) -> None:
+        """
+        Set CardKB NeoPixel to yellow when Ctrl is armed, clear when disarmed.
+
+        Args:
+        - armed (`bool`): ``True`` to illuminate yellow, ``False`` to turn off.
+
+        """
+        if self._cardkb is not None:
+            if armed:
+                # Yellow: 255 Red, 200 Green, 0 Blue (matches yellow cursor #ffe08a)
+                getattr(self._cardkb, "set_led", lambda *a: None)(255, 200, 0)
+            else:
+                getattr(self._cardkb, "clear_led", lambda: None)()
 
     @staticmethod
     def _valid_font_size(font_size: int) -> int:
@@ -310,6 +447,11 @@ class TerminalBridge:
         else:
             runs = grid.diff(self._prev)
         ok = all(self._send_run(run) for run in runs)
+        if self._transport is not None:
+            try:
+                self._transport.flush()
+            except (OSError, ModuleNotFoundError):
+                pass
         self._prev = grid.snapshot() if ok else None
 
     def _clear_panel(self) -> None:
@@ -333,10 +475,15 @@ class TerminalBridge:
             filled=True,
         )
         self._send(serialize(clear))
+        if self._transport is not None:
+            try:
+                self._transport.flush()
+            except (OSError, ModuleNotFoundError):
+                pass
 
     # -- login ----------------------------------------------------------------
 
-    def _login(self, keys: Iterator[int]) -> str | None:
+    def _login(self, keys: KeyQueue) -> str | None:
         """
         Render and drive the login gate until a user authenticates.
 
@@ -344,10 +491,10 @@ class TerminalBridge:
         :class:`.login.LoginState`, and on a :class:`.login.SubmitEvent`
         authenticate via PAM: success returns the username; failure clears the
         password, shows a brief error, and stays on the gate. The resize chord is
-        ignored here so it cannot disturb password entry.
+        supported to adjust font size.
 
         Args:
-        - keys (`Iterator[int]`): The self-recovering CardKB key stream.
+        - keys (`KeyQueue`): The non-blocking CardKB key queue.
 
         Returns:
         `str | None`: The authenticated username, or ``None`` if the key stream
@@ -358,19 +505,45 @@ class TerminalBridge:
             users=list(self._config.users),
             mask=self._config.password_mask,
         )
-        error = ""
-        self._render_login_screen(state, error)
+        self._render_login_screen(state, "")
         tracepoint("terminal.login", status="shown", users=len(state.users))
-        for key in keys:
-            if key == RESIZE_CHORD:
-                continue  # resize is ignored mid-login
-            submit = state.feed_key(key)
-            if submit is not None:
-                user = self._handle_submit(state, submit)
-                if user is not None:
-                    return user
-                error = "login failed"
-            self._render_login_screen(state, error)
+        while True:
+            key = keys.get_blocking()
+            if key is None:
+                return None
+            if key in RESIZE_CHORDS:
+                self._rebuild_geometry()
+                self._render_login_screen(state, "")
+                continue
+            user = self._process_login_key(state, key)
+            if user is not None:
+                return user
+        return None
+
+    def _process_login_key(self, state: LoginState, key: int) -> str | None:
+        """
+        Process a single keypress on the login screen.
+
+        Args:
+        - state (`LoginState`): The active login UI state.
+        - key (`int`): The key byte to process.
+
+        Returns:
+        `str | None`: Username on successful auth, else ``None``.
+
+        """
+        if key in CTRL_LATCH_CHORDS:
+            return None
+        submit = state.feed_key(key)
+        if submit is None:
+            self._render_login_screen(state, "")
+            return None
+        user = self._handle_submit(state, submit)
+        if user is not None:
+            return user
+        self._render_login_screen(state, "wrong password")
+        time.sleep(3.0)
+        self._render_login_screen(state, "")
         return None
 
     def _render_login_screen(self, state: LoginState, error: str) -> None:
@@ -391,6 +564,7 @@ class TerminalBridge:
             self._geometry.cols,
             self._geometry.rows,
             error=error,
+            demo_mode=self._config.demo_mode,
         )
         self._paint(grid)
 
@@ -399,11 +573,12 @@ class TerminalBridge:
         Authenticate a submission, clearing the password buffer either way.
 
         The plaintext password is passed straight to PAM and never logged; the
-        login buffer is reset immediately after so no password lingers. On failure
-        the gate returns to user selection.
+        login buffer is cleared immediately after so no password lingers. On success
+        the gate resets to user selection; on failure the password buffer is cleared
+        so the user can retry on the password prompt.
 
         Args:
-        - state (`LoginState`): The login state (reset after the attempt).
+        - state (`LoginState`): The login state.
         - submit (`SubmitEvent`): The user/password submission.
 
         Returns:
@@ -416,8 +591,11 @@ class TerminalBridge:
             tracepoint("terminal.auth", status="unavailable", error=err)
             ok = False
         tracepoint("terminal.auth", user=submit.user, success=ok)
-        state.reset_to_user_select()
-        return submit.user if ok else None
+        if ok:
+            state.reset_to_user_select()
+            return submit.user
+        state.clear_password()
+        return None
 
     # -- shell ----------------------------------------------------------------
 
@@ -438,8 +616,13 @@ class TerminalBridge:
         `tuple[int, int]`: The ``(pid, master_fd)`` of the child shell.
 
         """
+        os.environ["TERM"] = "xterm"
         pid, master_fd = pty.fork()
         if pid == 0:  # pragma: no cover - runs only in the forked child
+            os.environ["TERM"] = "xterm"
+            # Emit immediate greeting banner to PTY before execing su
+            greeting = f"\033[1;36mWelcome back, {user}!\033[0m\r\n\r\n".encode("latin-1")
+            os.write(1, greeting)
             # su is a PAM-aware system binary resolved from PATH; it sets the
             # target uid/gid/env and starts the user's login shell. The user is
             # already authenticated via PAM before this point.
@@ -449,7 +632,7 @@ class TerminalBridge:
         tracepoint("terminal.shell_start", user=user, master_fd=master_fd)
         return pid, master_fd
 
-    def _run_shell(self, user: str, keys: Iterator[int]) -> None:
+    def _run_shell(self, user: str, keys: KeyQueue) -> None:
         """
         Run one shell session, pumping PTY<->CardKB<->serial until it exits.
 
@@ -462,19 +645,22 @@ class TerminalBridge:
 
         Args:
         - user (`str`): The authenticated user whose shell to run.
-        - keys (`Iterator[int]`): The CardKB key stream (drained non-blocking).
+        - keys (`KeyQueue`): The non-blocking CardKB key queue.
 
         Returns:
         `None`: Returns when the shell session ends.
 
         """
+        self._clear_panel()
+        self._prev = None  # force full repaint of shell screen over a cleared panel
         pid, master_fd = self._spawn_shell(user)
-        session = _ShellSession(self, master_fd, keys)
+        session = _ShellSession(self, master_fd, keys, user=user, initial_pid=pid)
         try:
             session.pump()
         finally:
             self._reap(pid, master_fd)
             tracepoint("terminal.logout", user=user)
+            self._clear_panel()
             self._prev = None  # force a clean repaint of the next login screen
 
     def _reap(self, pid: int, master_fd: int) -> None:
@@ -502,16 +688,17 @@ class TerminalBridge:
         except OSError:
             pass
 
-    def _rebuild_geometry(self, master_fd: int) -> Grid:
+    def _rebuild_geometry(self, master_fd: int | None = None) -> Grid:
         """
         Cycle the font size, recompute geometry, and inform the PTY.
 
         Advance :data:`RESIZE_SIZES`, recompute the grid geometry, push the new
-        window size to the PTY via ``TIOCSWINSZ`` so programs reflow, and force a
-        full repaint. Returns a fresh blank grid sized to the new geometry.
+        window size to the PTY via ``TIOCSWINSZ`` (if ``master_fd`` is supplied) so
+        programs reflow, and force a full repaint. Returns a fresh blank grid sized to
+        the new geometry.
 
         Args:
-        - master_fd (`int`): The PTY master to resize.
+        - master_fd (`int | None`, optional): The PTY master to resize if active.
 
         Returns:
         `Grid`: A new blank grid at the new geometry.
@@ -524,23 +711,35 @@ class TerminalBridge:
         )
         self._font_size = RESIZE_SIZES[(index + 1) % len(RESIZE_SIZES)]
         self._geometry = TerminalGeometry.for_font_size(self._font_size)
-        _tiocswinsz(master_fd, self._geometry)
+        if master_fd is not None:
+            _tiocswinsz(master_fd, self._geometry)
         self._prev = None
+        self._clear_panel()
         tracepoint(
             "terminal.resize",
             font_size=self._font_size,
             cols=self._geometry.cols,
         )
-        return Grid(
-            self._geometry.cols,
-            self._geometry.rows,
-            self._theme.fg,
-            self._theme.bg,
-        )
+        if hasattr(self, "_grid") and self._grid is not None:
+            grid = self._grid.reflow(self._geometry.cols, self._geometry.rows)
+        else:
+            grid = Grid(
+                self._geometry.cols,
+                self._geometry.rows,
+                self._theme.fg,
+                self._theme.bg,
+            )
+        grid.dirty = True
+        return grid
 
     # -- top-level loop -------------------------------------------------------
 
-    def run(self, keys: Iterator[int], *, sessions: int | None = None) -> None:
+    def run(
+        self,
+        keys: Iterator[int] | KeyQueue,
+        *,
+        sessions: int | None = None,
+    ) -> None:
         """
         Run the splash/login/shell loop until the key stream ends.
 
@@ -550,7 +749,7 @@ class TerminalBridge:
         daemon.
 
         Args:
-        - keys (`Iterator[int]`): The self-recovering CardKB key stream.
+        - keys (`Iterator[int] | KeyQueue`): The CardKB key stream or KeyQueue.
         - sessions (`int | None`, optional): Stop after this many shell sessions
           (for tests). Defaults to unbounded.
 
@@ -559,12 +758,13 @@ class TerminalBridge:
 
         """
         self._show_splash()
+        key_queue = keys if isinstance(keys, KeyQueue) else KeyQueue(keys)
         completed = 0
         while sessions is None or completed < sessions:
-            user = self._login(keys)
+            user = self._login(key_queue)
             if user is None:
                 return
-            self._run_shell(user, keys)
+            self._run_shell(user, key_queue)
             completed += 1
 
     def _show_splash(self) -> None:
@@ -582,6 +782,7 @@ class TerminalBridge:
         transport = self._ensure_serial()
         if transport is not None:
             show_splash(transport, self._config.splash_rgb565)
+            time.sleep(3.0)
 
 
 class _ShellSession:
@@ -599,7 +800,11 @@ class _ShellSession:
         self,
         bridge: TerminalBridge,
         master_fd: int,
-        keys: Iterator[int],
+        keys: KeyQueue,
+        status_bar: StatusBar | None = None,
+        user: str = "whisker",
+        initial_pid: int = 0,
+        max_workspaces: int = DEFAULT_MAX_WORKSPACES,
     ) -> None:
         """
         Initialize a shell session pump over an open PTY master.
@@ -607,12 +812,17 @@ class _ShellSession:
         Args:
         - bridge (`TerminalBridge`): The owning bridge (serial, geometry, paint).
         - master_fd (`int`): The PTY master descriptor.
-        - keys (`Iterator[int]`): The CardKB key stream to drain.
+        - keys (`KeyQueue`): The non-blocking CardKB key queue to drain.
+        - status_bar (`StatusBar | None`, optional): Optional status bar instance.
+        - user (`str`, optional): Authenticated shell user. Defaults to "whisker".
+        - initial_pid (`int`, optional): Child shell PID. Defaults to 0.
+        - max_workspaces (`int`, optional): Workspace ceiling. Defaults to 4.
 
         """
         self._bridge = bridge
         self._master_fd = master_fd
         self._keys = keys
+        self._user = user
         self._grid = Grid(
             bridge._geometry.cols,
             bridge._geometry.rows,
@@ -621,6 +831,77 @@ class _ShellSession:
         )
         self._emulator = VTEmulator(self._grid, bridge._theme)
         self._last_keyframe = time.monotonic()
+        self._ctrl_armed: bool = False
+        self._ctrl_armed_at: float = 0.0
+
+        if status_bar is not None:
+            self._status_bar: StatusBar | None = status_bar
+        else:
+            config = getattr(bridge, "_config", None)
+            if isinstance(config, BridgeConfig) and config.status_bar_enabled:
+                self._status_bar = StatusBar(
+                    theme=bridge._theme,
+                    position=config.status_bar_position,
+                )
+            else:
+                self._status_bar = None
+
+        self._workspaces = WorkspaceManager(
+            bridge=bridge,
+            user=user,
+            max_workspaces=max_workspaces,
+            spawn_fn=getattr(bridge, "_spawn_shell", None),
+        )
+        ws = self._workspaces.create_workspace(
+            ws_id=1,
+            name="1",
+            user=user,
+            initial_fd=master_fd,
+            initial_pid=initial_pid,
+        )
+        ws.grid = self._grid
+        ws.emulator = self._emulator
+
+    def _arm_ctrl(self) -> None:
+        """Arm sticky Ctrl latch, recoloring cursor yellow and setting NeoPixel."""
+        self._ctrl_armed = True
+        self._ctrl_armed_at = time.monotonic()
+        self._bridge.set_ctrl_led(True)
+        self._paint_session()
+
+    def _disarm_ctrl(self, repaint: bool = True) -> None:
+        """Disarm sticky Ctrl latch, clearing NeoPixel and resetting cursor."""
+        if self._ctrl_armed:
+            self._ctrl_armed = False
+            self._bridge.set_ctrl_led(False)
+            if repaint:
+                self._paint_session()
+
+    def _is_ctrl_armed(self) -> bool:
+        """
+        Return whether the sticky Ctrl modifier latch is currently armed.
+
+        A latch automatically expires if more than :data:`CTRL_LATCH_TIMEOUT_S`
+        seconds elapse without a qualifying keystroke. When expired, immediately
+        resets NeoPixel and cursor indicator.
+
+        Returns:
+        `bool`: ``True`` if armed and unexpired, else ``False``.
+
+        """
+        if not self._ctrl_armed:
+            return False
+        if time.monotonic() - self._ctrl_armed_at > CTRL_LATCH_TIMEOUT_S:
+            self._disarm_ctrl(repaint=True)
+            return False
+        return True
+
+    def _drain_startup(self) -> None:
+        """Drain startup output until quiet or timeout."""
+        deadline = time.monotonic() + _SHELL_STARTUP_MAX_S
+        while time.monotonic() < deadline:
+            if not self._select_pty(_SHELL_STARTUP_QUIET_S) or not self._fetch_and_feed_pty():
+                break
 
     def pump(self) -> None:
         """
@@ -634,35 +915,260 @@ class _ShellSession:
         `None`: Returns when the shell session ends.
 
         """
-        self._bridge._paint(self._grid)
+        self._workspaces.start_ipc_server()
+        self._drain_startup()
+        self._paint_session()
         running = True
-        while running:
-            running = self._read_pty()
-            self._drain_keys()
-            self._maybe_keyframe()
+        try:
+            while running:
+                running = self._read_pty()
+                self._drain_keys()
+                self._is_ctrl_armed()
+                self._maybe_keyframe()
+        finally:
+            self._workspaces.close_all()
+            self._disarm_ctrl(repaint=False)
 
-    def _read_pty(self) -> bool:
+    def _paint_session(self) -> None:
+        """
+        Paint the shell grid with the cursor highlighted to the display.
+
+        When the sticky Ctrl modifier is armed, the cursor cell is recolored
+        using the bright yellow ANSI color to provide an unambiguous visual cue.
+
+        Returns:
+        `None`: The grid with cursor is diffed and sent.
+
+        """
+        cursor_bg = (
+            self._bridge._theme.ansi[11]
+            if self._ctrl_armed
+            else self._bridge._theme.cursor
+        )
+        display_grid = self._grid.render_with_cursor(
+            cursor_fg=self._bridge._theme.bg,
+            cursor_bg=cursor_bg,
+        )
+        if self._status_bar is not None:
+            self._status_bar.set_ctrl_latch(self._ctrl_armed)
+            self._status_bar.render_to_grid(display_grid)
+        self._bridge._paint(display_grid)
+        if self._grid.dirty:
+            self._grid.dirty = False
+
+    def _dispatch_readable_fds(self, readable: list[int]) -> None:
+        for fd in readable:
+            if self._workspaces.is_ipc_fd(fd):
+                self._workspaces.handle_ipc_fd(fd)
+            else:
+                self._workspaces.read_pty_fd(fd, ctrl_armed=self._ctrl_armed)
+
+    def _sync_active_ws(self) -> None:
+        self._workspaces.cleanup_dead_sessions()
+        ws = self._workspaces.active_workspace
+        if ws is not None:
+            self._master_fd = ws.master_fd
+            self._grid = ws.grid
+            self._emulator = ws.emulator
+            if self._status_bar is not None:
+                self._status_bar.workspace = ws.id
+
+    def _read_pty(self, timeout_s: float = _POLL_TIMEOUT_S) -> bool:
         """
         Read one chunk of PTY output, feeding the emulator and repainting.
+
+        Args:
+        - timeout_s (`float`, optional): Poll timeout in seconds. Defaults to `_POLL_TIMEOUT_S`.
 
         Returns:
         `bool`: ``True`` if the shell is still running, ``False`` on EOF/error.
 
         """
-        try:
-            readable, _, _ = select.select([self._master_fd], [], [], _POLL_TIMEOUT_S)
-        except OSError:
+        read_fds = self._workspaces.get_read_fds()
+        if not read_fds:
             return False
-        if not readable:
-            return True
+        try:
+            readable, _, _ = select.select(read_fds, [], [], timeout_s)
+        except OSError as err:
+            return err.errno in (errno.EAGAIN, errno.EINTR)
+        self._dispatch_readable_fds(readable)
+        self._sync_active_ws()
+        return self._workspaces.has_alive_workspaces()
+
+    def _select_pty(self, timeout_s: float) -> bool:
+        """
+        Wait for PTY descriptor readability up to ``timeout_s``.
+
+        Args:
+        - timeout_s (`float`): Poll timeout in seconds.
+
+        Returns:
+        `bool`: ``True`` if readable data is pending, ``False`` on timeout or signal.
+
+        """
+        try:
+            readable, _, _ = select.select([self._master_fd], [], [], timeout_s)
+        except OSError as err:
+            return err.errno in (errno.EAGAIN, errno.EINTR)
+        return bool(readable)
+
+    def _fetch_and_feed_pty(self) -> bool:
+        """
+        Read pending bytes from PTY master and feed into emulator.
+
+        Returns:
+        `bool`: ``True`` if shell continues, ``False`` on EOF or fatal error.
+
+        """
         try:
             data = os.read(self._master_fd, _PTY_READ_BYTES)
         except OSError as err:
-            return err.errno == errno.EAGAIN
+            return err.errno in (errno.EAGAIN, errno.EINTR)
         if not data:
             return False
         self._emulator.feed(data)
-        self._bridge._paint(self._grid)
+        self._paint_session()
+        return True
+
+    def _resolve_key_payload(self, key: int) -> bytes | None:
+        """
+        Resolve a CardKB key byte to its PTY payload, filtering unmapped Fn bytes.
+
+        Args:
+        - key (`int`): The CardKB key byte.
+
+        Returns:
+        `bytes | None`: The byte payload to write to PTY master, or ``None`` to ignore.
+
+        """
+        if key in _KEY_TRANSLATIONS:
+            return _KEY_TRANSLATIONS[key]
+        # Printable ASCII, or any C0 control byte 0x01-0x1F (Ctrl+letter sends
+        # 0x01..0x1A, so Ctrl-C=0x03 / Ctrl-D=0x04 / Ctrl-Z=0x1A reach the shell).
+        # The resize chord (Fn+Del, 0x8B) is intercepted upstream and never
+        # arrives here; Fn-layer bytes (0x80-0xAF) are otherwise dropped below.
+        if 0x20 <= key <= 0x7E or 0x01 <= key <= 0x1F:
+            return bytes((key,))
+        return None
+
+    def switch_workspace(self, ws_id: int) -> bool:
+        """Switch active workspace, syncing state and repainting."""
+        ok = self._workspaces.switch_workspace(ws_id)
+        self._sync_active_ws()
+        if ok:
+            self._paint_session()
+        return ok
+
+    def next_workspace(self) -> int:
+        """Switch to next active workspace."""
+        new_id = self._workspaces.next_workspace()
+        self._sync_active_ws()
+        self._paint_session()
+        return new_id
+
+    def prev_workspace(self) -> int:
+        """Switch to previous active workspace."""
+        prev_id = self._workspaces.prev_workspace()
+        self._sync_active_ws()
+        self._paint_session()
+        return prev_id
+
+    def _handle_workspace_chord(self, key: int) -> bool | None:
+        if key in WORKSPACE_DIRECT_CHORDS:
+            self._disarm_ctrl(repaint=False)
+            self.switch_workspace(WORKSPACE_DIRECT_CHORDS[key])
+            return True
+        if key == WORKSPACE_NEXT_CHORD:
+            self._disarm_ctrl(repaint=False)
+            self.next_workspace()
+            return True
+        if key == WORKSPACE_PREV_CHORD:
+            self._disarm_ctrl(repaint=False)
+            self.prev_workspace()
+            return True
+        return None
+
+    def _handle_resize_chord(self) -> bool:
+        self._disarm_ctrl(repaint=False)
+        self._grid = self._bridge._rebuild_geometry(self._master_fd)
+        if hasattr(self._emulator, "set_grid"):
+            self._emulator.set_grid(self._grid)
+        else:
+            self._emulator = VTEmulator(self._grid, self._bridge._theme)
+        if hasattr(self, "_workspaces") and self._workspaces:
+            self._workspaces.rebuild_geometry(self._bridge._geometry)
+            if self._workspaces.active_workspace:
+                self._grid = self._workspaces.active_workspace.grid
+                self._emulator = self._workspaces.active_workspace.emulator
+        self._paint_session()
+        return True
+
+    def _handle_latch_chord(self) -> bool:
+        if self._is_ctrl_armed():
+            self._disarm_ctrl(repaint=True)
+        else:
+            self._arm_ctrl()
+        return True
+
+    def _handle_chord(self, key: int) -> bool | None:
+        """
+        Handle resize, Ctrl latch, or workspace chords, returning bool if handled.
+
+        Args:
+        - key (`int`): Key byte to check against registered chords.
+
+        Returns:
+        `bool | None`: ``True`` if handled and consumed, else ``None``.
+
+        """
+        if key in RESIZE_CHORDS:
+            return self._handle_resize_chord()
+        if key in CTRL_LATCH_CHORDS:
+            return self._handle_latch_chord()
+        return self._handle_workspace_chord(key)
+
+    def _consume_latch_payload(self, key: int) -> bytes | None:
+        """
+        Consume armed latch and resolve modified or pass-through payload.
+
+        Args:
+        - key (`int`): Keystroke byte presented to the armed latch.
+
+        Returns:
+        `bytes | None`: Resolved PTY payload.
+
+        """
+        self._disarm_ctrl(repaint=True)
+        if key in _CTRL_VALID_CHARS:
+            return bytes((key & 0x1F,))
+        return self._resolve_key_payload(key)
+
+    def _process_single_key(self, key: int) -> bool:
+        """
+        Process a single pending key from CardKB.
+
+        Args:
+        - key (`int`): The key byte to process.
+
+        Returns:
+        `bool`: ``True`` to continue processing keys, ``False`` on fatal write error.
+
+        """
+        chord_handled = self._handle_chord(key)
+        if chord_handled is not None:
+            return chord_handled
+
+        payload = (
+            self._consume_latch_payload(key)
+            if self._is_ctrl_armed()
+            else self._resolve_key_payload(key)
+        )
+        if payload is None:
+            return True
+        try:
+            os.write(self._master_fd, payload)
+        except OSError as err:
+            return err.errno in (errno.EAGAIN, errno.EINTR)
         return True
 
     def _drain_keys(self) -> None:
@@ -678,43 +1184,39 @@ class _ShellSession:
 
         """
         for key in self._pending_keys():
-            if key == RESIZE_CHORD:
-                self._grid = self._bridge._rebuild_geometry(self._master_fd)
-                self._emulator = VTEmulator(self._grid, self._bridge._theme)
-                self._bridge._paint(self._grid)
-                continue
-            try:
-                os.write(self._master_fd, bytes((key,)))
-            except OSError:
+            if not self._process_single_key(key):
                 return
 
     def _pending_keys(self) -> list[int]:
         """
         Collect CardKB keys that are ready right now, without blocking.
 
-        The CardKB stream is poll-backed; this reads one key per pump turn so the
-        PTY stays responsive without starving output. Returns an empty list when
-        no key is pending.
-
         Returns:
-        `list[int]`: Zero or one pending key byte.
+        `list[int]`: Pending key bytes currently in the queue.
 
         """
-        try:
-            key = next(self._keys)
-        except StopIteration:
-            return []
-        return [key]
+        result: list[int] = []
+        while True:
+            key = self._keys.get_nowait()
+            if key is None:
+                break
+            result.append(key)
+        return result
 
     def _maybe_keyframe(self) -> None:
         """
-        Force a full-repaint keyframe once the keyframe interval elapses.
+        Repaint on the keyframe interval, but only the cells that changed.
 
-        Dropping the previous-frame baseline makes the next paint a full repaint,
-        which recovers a CYD that reset mid-session.
+        The firmware link is host->device only: it emits no reset/hello byte the
+        bridge could watch for, so a true reset-triggered repaint is not buildable
+        without a firmware change (reflash). As the no-reflash fallback this stays
+        a periodic timer but is diff-gated: it paints against the existing ``_prev``
+        baseline instead of blindly dropping it, so an idle, unchanged screen
+        diffs to zero runs and transmits ZERO bytes (no flicker). Any drift that
+        did creep in on the device still gets corrected within one interval.
 
         Returns:
-        `None`: May trigger a full repaint.
+        `None`: May transmit changed-cell runs; sends nothing when idle.
 
         """
         interval = self._bridge._config.keyframe_interval_s
@@ -723,6 +1225,5 @@ class _ShellSession:
         now = time.monotonic()
         if now - self._last_keyframe >= interval:
             self._last_keyframe = now
-            self._bridge._prev = None
-            self._bridge._paint(self._grid)
+            self._paint_session()
             tracepoint("terminal.keyframe", font_size=self._bridge._font_size)
