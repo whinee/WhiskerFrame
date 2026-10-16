@@ -185,6 +185,29 @@ def check_column_fitting_status() -> None:
             f"Status line {i} exceeds 53 columns ({len(line)} chars): {line!r}",
         )
 
+    # Also test with connectivity states (portal, limited, full, none)
+    for state in ("portal", "limited", "full", "none"):
+        data_conn = wifi.parse_status_data(
+            dev_status_out=dev_status,
+            dev_show_out=dev_show,
+            wifi_list_out=wifi_list,
+            conn_show_out=conn_show,
+            connectivity=state,
+        )
+        lines_conn = wifi.format_status(data_conn)
+        _assert(
+            any(
+                "Portal:" in line_item or "Internet:" in line_item
+                for line_item in lines_conn
+            ),
+            f"Expected connectivity indicator for state '{state}'",
+        )
+        for _i, line in enumerate(lines_conn):
+            _assert(
+                len(line) <= 53,
+                f"Line for connectivity={state} exceeds 53 cols: {line!r}",
+            )
+
 
 def check_column_fitting_text_wrapper() -> None:
     """Verify wrap_text guarantees all lines <= 53 columns."""

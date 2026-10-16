@@ -30,8 +30,73 @@ The Raspberry Pi Zero 2W integrates a Broadcom BCM43436 wireless chip handled by
 
 ### Critical Field Limitations
 1. **5 GHz Invisibility**: The BCM43436 hardware physically lacks a 5 GHz RF front-end mixer, filter, and antenna switch. It **cannot scan, detect, or connect** to 5 GHz (802.11a/ac/ax) Wi-Fi networks.
-2. **Dual-Band SSID Traps**: Access points broadcasting a single SSID across both 2.4 GHz and 5 GHz with aggressive band steering may attempt to push the client to 5 GHz. The `pi/bin/wifi` helper explicitly discriminates BSSIDs and selects 2.4 GHz entries.
+2. **Dual-Band SSID Traps**: Access points broadcasting a single SSID across both 2.4 GHz and 5 GHz with aggressive band steering may attempt to push the client to 5 GHz by dropping 2.4 GHz probe responses or sending deauth frames. The `pi/bin/wifi` helper explicitly discriminates BSSIDs and selects 2.4 GHz entries.
 3. **5 GHz Hotspot Invisibility**: Modern smartphones and laptops default to 5 GHz for hotspot sharing. If a hotspot is configured on 5 GHz, the cyberdeck will see zero beacons and report no networks found.
+4. **2.4 GHz Congestion & Co-existence**: High density of Bluetooth (including onboard Bluetooth) and overlapping Wi-Fi signals causes packet drops. Disabling 802.11 power saving (`powersave=2`) prevents the radio from missing frames during DTIM sleep windows.
+
+---
+
+## 3. Venue Network Edge Cases & Hardened Mitigations
+
+Venue Wi-Fi networks (conferences, hackathons, university campuses such as CvSU, hotels, transit hubs) present hostile environments for headless or embedded devices. The following edge cases and concrete mitigations are codified for WhiskerFrame operations:
+
+### Edge Case 1: WPA2/WPA3-Enterprise (802.1X / EAP-PEAP / MSCHAPv2 / eduroam)
+* **The Trap**: University and corporate venues enforce IEEE 802.1X Network Access Control requiring Phase 2 inner authentication (e.g. PEAP/MSCHAPv2, TTLS, or TLS client certificates). A standard interactive passphrase prompt (`wifi join`) cannot negotiate enterprise identity exchanges.
+* **Concrete Mitigations**:
+  1. **Hotspot Bridge (Recommended Field Method)**: Connect smartphone or laptop to the 802.1X network, then share connection via 2.4 GHz tethering (Method A / Method B). The mobile device terminates 802.1X and delivers simple WPA2-PSK to the cyberdeck.
+  2. **Pre-staged NetworkManager Profile**: For frequent venues (e.g. CvSU campus), pre-configure an enterprise connection profile in `/etc/NetworkManager/system-connections/CvSU-Enterprise.nmconnection`:
+     ```ini
+     [connection]
+     id=CvSU-Enterprise
+     type=wifi
+     interface-name=wlan0
+
+     [wifi]
+     mode=infrastructure
+     ssid=CvSU-WiFi
+
+     [wifi-security]
+     key-mgmt=wpa-eap
+
+     [802-1x]
+     eap=peap;
+     identity=<student-or-staff-id>
+     password=<password>
+     phase2-auth=mschapv2
+     ```
+  3. **Automated Detection**: `pi/bin/wifi join` detects `802.1X` or `EAP` flags during scanning and alerts the operator on screen to use pre-configured profiles or hotspot tethering.
+
+### Edge Case 2: Captive Portals (Hotels, Coffee Shops, Guest Networks)
+* **The Trap**: Guest networks grant a DHCP lease and local IP, but hijack DNS and intercept HTTP/HTTPS traffic with an HTTP 302 redirect to a captive web login / Terms-of-Service portal. Because the cyberdeck lacks a full browser on the physical console, internet routing remains blocked.
+* **Concrete Mitigations**:
+  1. **Connectivity Check on Console**: `pi/bin/wifi status` invokes `nmcli networking connectivity check` and explicitly displays `Portal: CAPTIVE PORTAL DETECTED!` or `Internet: connected (full)` within the 53-column boundary.
+  2. **MAC Address Cloning**: If a venue captive portal requires browser authentication:
+     - Connect smartphone or laptop to the venue Wi-Fi and complete portal login.
+     - Note the authorized device's MAC address.
+     - Clone that MAC onto the cyberdeck `wlan0`:
+       ```bash
+       sudo nmcli connection modify <SSID> 802-11-wireless.cloned-mac-address <AUTH_MAC>
+       sudo nmcli connection up <SSID>
+       ```
+  3. **Terminal Browser / Curl Fallback**: For simple forms without complex JavaScript:
+     ```bash
+     curl -s -L http://neverssl.com | head -n 30
+     ```
+  4. **Bypass via Phone Hotspot**: Avoid captive portal entirely by tethering via phone mobile data.
+
+### Edge Case 3: AP Client Isolation (Station Isolation / Private VLAN)
+* **The Trap**: The access point drops Layer 2 and Layer 3 peer-to-peer traffic between stations. Even if laptop and cyberdeck are on the same Wi-Fi, SSH and pings fail silently.
+* **Concrete Mitigations**:
+  1. **NetBird Mesh VPN**: WireGuard overlay over outbound UDP to external relays traverses isolation effortlessly.
+  2. **USB Serial Gadget**: Direct zero-network access via `/dev/ttyACM0` on the laptop.
+  3. **Hardware CYD/CardKB**: Full console access directly on physical hardware.
+
+### Edge Case 4: 2.4 GHz Spectrum Congestion & Band Steering
+* **The Trap**: High noise floor, overlapping BSSIDs on channels 1, 6, 11, and aggressive AP band steering trying to push dual-band clients to 5 GHz.
+* **Concrete Mitigations**:
+  1. **Deduplication Favoring 2.4 GHz**: `pi/bin/wifi scan` groups APs by SSID and picks the strongest 2.4 GHz BSSID, ignoring 5 GHz entries that would otherwise fail.
+  2. **Wi-Fi Power Save Disabled**: NetworkManager default Wi-Fi powersave is set to `2` (disabled) via `/etc/NetworkManager/conf.d/default-wifi-powersave.conf` (managed by `wifi_persistence` role).
+  3. **Regulatory Domain Lockdown**: Fixed to `country=PH` in both wpa_supplicant and kernel regdomain to enable valid transmission on channels 1-13 without channel hopping delays.
 
 ---
 
@@ -108,8 +173,8 @@ NetBird provides an encrypted WireGuard-based mesh overlay. Because peers connec
                  [NetBird Relay / STUN]
 ```
 
-* **Ansible Role**: `ansible/roles/native_services` contains the native NetBird systemd unit with memory safety ceiling (`MemoryMax=150M`).
-* **Current Status**: **BLOCKED-ON-OPERATOR**. Unattended enrollment requires `vault_netbird_setup_key` populated in Ansible vault (`ansible/host_vars/cyberdeck/vault.yml`).
+* **Ansible Role**: Dedicated `ansible/roles/netbird` role (also accessible via `native_services` tags) installs client binary and supervises `netbird.service` with memory safety ceiling (`MemoryMax=150M`).
+* **Current Status**: **BLOCKED-ON-OPERATOR**. Unattended enrollment requires `vault_netbird_setup_key` populated in Ansible vault (`ansible/host_vars/cyberdeck/vault.yml`). If key is omitted, deployment gracefully stages the service with a skip notice.
 * **Operator Action**: Once the setup key is provided in vault, run:
   ```bash
   cd ansible && uvx --from ansible-core ansible-playbook -i inventory.ini site.yml --tags netbird

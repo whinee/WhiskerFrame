@@ -1,0 +1,24 @@
+---
+# Defaults for netbird role.
+#
+# WireGuard-based mesh overlay client.
+# Runs natively under systemd with a MemoryMax ceiling to protect the 416MB Pi Zero 2W.
+# Enrollment requires an operator-provided setup key; without it, the service is
+# staged in a running but un-enrolled state (NeedsLogin) and logs a BLOCKED-ON-OPERATOR notice.
+
+netbird_enabled: true
+
+# Memory ceiling for the systemd unit (DEC-W10 memory safety pattern)
+netbird_mem_max: "150M"
+
+# Setup key for unattended enrollment.
+# Defaults to vault_netbird_setup_key if defined in host/group vars.
+netbird_setup_key: "{{ vault_netbird_setup_key | default('') }}"
+
+# Self-hosted management URL (empty = NetBird default cloud management)
+netbird_management_url: ""
+
+# APT repository configuration for Debian Trixie / Bookworm
+netbird_apt_key_url: "https://pkgs.netbird.io/debian/public.key"
+netbird_apt_key_path: "/etc/apt/keyrings/netbird.gpg"
+netbird_apt_repo_url: "https://pkgs.netbird.io/debian"

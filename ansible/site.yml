@@ -25,9 +25,12 @@
     # Memory safety layer (SSD swap backstop, swappiness, earlyoom)
     - role: memory_safety
       tags: [memory_safety]
-    # Native self-hosted services (Git, Syncthing, NetBird, File Browser)
+    # Native self-hosted services (Git, Syncthing, File Browser)
     - role: native_services
       tags: [native_services]
+    # NetBird mesh VPN overlay (TSK-07 / WS-I)
+    - role: netbird
+      tags: [netbird, native_services]
     # Guest demo user & kernel-level isolation (Phase 5)
     - role: guest_demo
       tags: [guest_demo, demo]
