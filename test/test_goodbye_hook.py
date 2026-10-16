@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -45,17 +46,14 @@ class TestGoodbyeHook(unittest.TestCase):
     """Test suite for goodbye splash hook."""
 
     def setUp(self) -> None:
-        self.tmp_dir = REPO_ROOT / "test/__pycache__/goodbye_test_tmp"
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._temp_dir.name)
         self.valid_blob_path = self.tmp_dir / "valid.rgb565"
         self.valid_bytes = bytes([0x18, 0xC5] * (128 * 128))
         self.valid_blob_path.write_bytes(self.valid_bytes)
 
     def tearDown(self) -> None:
-        if self.valid_blob_path.exists():
-            self.valid_blob_path.unlink()
-        if self.tmp_dir.exists():
-            self.tmp_dir.rmdir()
+        self._temp_dir.cleanup()
 
     def test_read_image_blob_valid(self) -> None:
         """Valid 32768-byte file is read correctly."""

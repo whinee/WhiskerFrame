@@ -13,6 +13,7 @@ jobs:
   lint-and-format:
     name: Lint & Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,19 +40,27 @@ jobs:
   unit-and-property-tests:
     name: Pytest & Hypothesis Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.4"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sudo tar -xz -C /usr/local/bin gitleaks
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[preview,serial] hypothesis pydantic pyyaml pyfiglet pillow
+          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool
 
       - name: Execute Pytest Suite
         run: pytest -v
@@ -59,14 +68,22 @@ jobs:
   security-audit:
     name: Automated Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.4"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sudo tar -xz -C /usr/local/bin gitleaks
 
       - name: Run Security Verification Script
         run: |
@@ -76,6 +93,7 @@ jobs:
   typography-and-benchmarks:
     name: Typography & Transport Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -97,17 +115,27 @@ jobs:
   acceptance-tests:
     name: Master Acceptance Suite (ATP-01..13)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.4"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sudo tar -xz -C /usr/local/bin gitleaks
+
       - name: Install acceptance dependencies
-        run: pip install -e . pytest hypothesis pydantic pillow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[preview,serial] pytest hypothesis pydantic pyyaml pyfiglet pillow python-dotenv esptool
 
       - name: Run Master Acceptance Test Runner
         run: python scripts/run_all_acceptance_tests.py
@@ -115,6 +143,7 @@ jobs:
   build-and-packaging:
     name: Build & Artifact Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -132,5 +161,5 @@ jobs:
 
       - name: Verify Firmware Release Manifest Dry-Run
         run: |
-          pip install pyyaml
+          pip install python-dotenv pyyaml esptool
           python scripts/flash_cyd_display_link.py --dry-run
