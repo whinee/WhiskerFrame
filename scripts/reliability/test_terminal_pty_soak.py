@@ -109,6 +109,8 @@ class TestTerminalPtySoak(unittest.TestCase):
 
     def setUp(self) -> None:
         self.master_fd, self.slave_fd = os.openpty()
+        os.set_blocking(self.master_fd, False)
+        os.set_blocking(self.slave_fd, False)
         self.theme = load_theme(None)
         self.config = BridgeConfig(theme=self.theme)
         self.bridge = TerminalBridge(self.config)
@@ -160,22 +162,32 @@ class TestTerminalPtySoak(unittest.TestCase):
             self.assertTrue(ok, f"Processing failed on key {key:#02x} at index {processed}")
             processed += 1
 
-            # Periodically simulate bidirectional PTY traffic
+            # Periodically drain bidirectional PTY traffic without blocking
             if processed % 50 == 0:
-                # Check if data was written to slave side
-                r_ready, _, _ = select.select([self.master_fd, self.slave_fd], [], [], 0.0)
-                if self.slave_fd in r_ready:
+                # 1. Drain all pending output from slave side
+                while True:
                     try:
-                        read_bytes = os.read(self.slave_fd, 1024)
-                        # Echo back formatted terminal response
-                        if read_bytes:
-                            simulated_echo = b"\r\n\x1b[32moutput\x1b[0m " + read_bytes[:16]
+                        read_bytes = os.read(self.slave_fd, 4096)
+                        if not read_bytes:
+                            break
+                        simulated_echo = b"\r\n\x1b[32moutput\x1b[0m " + read_bytes[:16]
+                        try:
                             os.write(self.slave_fd, simulated_echo)
-                    except OSError:
-                        pass
+                        except (BlockingIOError, OSError):
+                            pass
+                    except (BlockingIOError, OSError):
+                        break
 
-                if self.master_fd in r_ready:
-                    session._fetch_and_feed_pty()
+                # 2. Drain all pending input from master side into emulator
+                while True:
+                    try:
+                        data = os.read(self.master_fd, 4096)
+                        if not data:
+                            break
+                        session._emulator.feed(data)
+                    except (BlockingIOError, OSError):
+                        break
+                session._paint_session()
 
         elapsed = time.monotonic() - start_time
         snapshot_end = tracemalloc.take_snapshot()

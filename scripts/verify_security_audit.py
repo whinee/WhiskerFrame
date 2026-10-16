@@ -343,13 +343,18 @@ def check_tmpfs_memory_budget() -> AuditResult:
 
 def check_gitleaks_zero_findings() -> AuditResult:
     """Run gitleaks detect across all commits to assert 0 secrets."""
-    bin_path = shutil.which("gitleaks") or "/home/lyra/.local/bin/gitleaks"
-    if not Path(bin_path).is_file():
+    bin_path = shutil.which("gitleaks")
+    if not bin_path:
+        for candidate in ["/usr/local/bin/gitleaks", "/home/lyra/.local/bin/gitleaks"]:
+            if Path(candidate).is_file():
+                bin_path = candidate
+                break
+    if not (bin_path and Path(bin_path).is_file()):
         return AuditResult(
             domain="Secrets Audit",
             name="Gitleaks Commit Scan",
             passed=False,
-            details=f"gitleaks binary not found at {bin_path}",
+            details=f"gitleaks binary not found in PATH, /usr/local/bin, or /home/lyra/.local/bin",
         )
 
     res = subprocess.run(  # noqa: S603
