@@ -38,6 +38,12 @@ static const unsigned long kSerialBaud = 115200;
 // bounds contract stays correct here.
 static const uint8_t kDisplayRotation = 1;
 
+// Rear RGB LED pins (CYD ESP32-2432S028). Active-LOW (common anode to 3.3V).
+// Driven HIGH at boot to turn OFF and prevent permanent red LED glow.
+static const uint8_t kPinRgbRed = 4;
+static const uint8_t kPinRgbGreen = 16;
+static const uint8_t kPinRgbBlue = 17;
+
 // -- Globals -----------------------------------------------------------------
 
 // The single TFT_eSPI display driver instance. Pins/driver are configured via
@@ -110,6 +116,14 @@ static void dispatch(cyd_display_link::FrameDecoder& dec) {
 
 // Boot: initialize the ILI9341 display and open the serial interface (Req 2.2).
 void setup() {
+  // Turn off rear RGB LED (active-LOW) on boot to avoid permanent red glow.
+  digitalWrite(kPinRgbRed, HIGH);
+  digitalWrite(kPinRgbGreen, HIGH);
+  digitalWrite(kPinRgbBlue, HIGH);
+  pinMode(kPinRgbRed, OUTPUT);
+  pinMode(kPinRgbGreen, OUTPUT);
+  pinMode(kPinRgbBlue, OUTPUT);
+
   tft.init();
   tft.setRotation(kDisplayRotation);
   // This CYD panel reports colours inverted (red<->cyan, white<->black, etc.)

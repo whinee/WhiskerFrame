@@ -58,11 +58,67 @@ version:
 splash:
     uv run python scripts/convert_splash.py
 
-# Rsync the Pi runtime (whiskerframe/, pi/, scripts/) to the deploy root on the Pi.
-# Infra params (PI_HOST/PI_USER/DEFAULT_KEY_PATH) come from .env (set dotenv-load).
+# Rsync the Pi runtime (whiskerframe/, pi/, scripts/, firmware/dist/) to the deploy root on the Pi.
+# Does NOT activate code or restart services. Infra params from .env (set dotenv-load).
 [unix]
 sync:
     rsync -a --exclude-from=pi/deploy-exclude.txt -e "ssh -i $DEFAULT_KEY_PATH" ./ "$PI_USER@$PI_HOST:/opt/cyd-display-link/"
+
+# Run preflight tests locally before deployment.
+[unix]
+preflight:
+    @ echo "=== Running pre-deploy preflight checks ==="
+    uv run pytest test/ -q --maxfail=1
+
+# Preflight checks, sync code, restart affected Pi services, and verify health.
+[unix]
+apply: preflight sync
+    @ echo "=== Activating runtime changes on Pi ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "systemctl restart terminal && systemctl is-active terminal"
+    @ echo "[SUCCESS] terminal.service restarted and active."
+
+# Compile CYD display link firmware and package distribution binaries with checksums.
+[unix]
+build-firmware:
+    @ echo "=== Compiling CYD Display Link Firmware ==="
+    uvx platformio run -d firmware/cyd_display_link
+    @ mkdir -p firmware/dist
+    @ cp firmware/cyd_display_link/.pio/build/esp32dev/bootloader.bin firmware/dist/
+    @ cp firmware/cyd_display_link/.pio/build/esp32dev/partitions.bin firmware/dist/
+    @ cp firmware/cyd_display_link/.pio/build/esp32dev/firmware.bin firmware/dist/
+    @ (cd firmware/dist && sha256sum bootloader.bin firmware.bin partitions.bin > checksums.sha256)
+    @ echo "=== Updated firmware/dist/checksums.sha256 ==="
+    @ cat firmware/dist/checksums.sha256
+
+# Safely flash compiled CYD firmware to the connected display coprocessor on the Pi.
+[unix]
+flash-firmware *FLAGS: sync
+    @ echo "=== Flashing CYD Display Link over Pi serial link ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "bash -c 'trap \"systemctl restart terminal\" EXIT; systemctl stop terminal; /opt/cyd-display-link/pi/.venv/bin/python /opt/cyd-display-link/scripts/flash_cyd_display_link.py --confirm {{FLAGS}}'"
+    @ echo "[SUCCESS] CYD firmware flashed and terminal.service restored."
+
+# Run full local tests and remote Pi hardware/service verification.
+[unix]
+verify:
+    @ echo "=== Local test suite ==="
+    uv run pytest test/
+    @ echo "=== Pi hardware and service verification ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "systemctl is-active terminal && ls -l /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 && i2cdetect -y 0"
+
+# Fetch terminal daemon logs from the Pi.
+[unix]
+logs *FLAGS="-n 50 --no-pager":
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "journalctl -u terminal {{FLAGS}}"
+
+# Query live status of cyberdeck services and attached peripherals on the Pi.
+[unix]
+status:
+    @ echo "=== Pi Services ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "systemctl status terminal --no-pager"
+    @ echo "=== Serial Devices ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "ls -la /dev/serial/by-id/"
+    @ echo "=== I2C Devices (Bus 0) ==="
+    ssh -i "$DEFAULT_KEY_PATH" "$PI_USER@$PI_HOST" "i2cdetect -y 0"
 
 # Install Galaxy collections, then run the Ansible playbook against the Pi.
 # Controller runs via uvx (no global ansible); Pi-side python still goes through uv.
