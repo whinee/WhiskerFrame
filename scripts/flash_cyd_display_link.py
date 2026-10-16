@@ -209,10 +209,13 @@ def build_flash_command(
     Uses `write_flash -z` (compressed) with explicit `--flash_size 4MB` (Req 7.2),
     preserving calibration, MAC address, and unwritten flash partitions.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "esptool",
+    import importlib.util
+
+    if importlib.util.find_spec("esptool") is not None:
+        base_cmd = [sys.executable, "-m", "esptool"]
+    else:
+        base_cmd = ["esptool"]
+    cmd = base_cmd + [
         "--chip",
         "esp32",
         "--port",
