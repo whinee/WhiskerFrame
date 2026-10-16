@@ -26,4 +26,5 @@ The link between the host Python library (`whiskerframe/`) and the ESP32 C++ fir
 | `0x03` | `DRAW_CELLS` | `start_col:u8, row:u8, fg:u16, bg:u16, glyph_run:bytes` | VT100 character grid cell updates (terminal core). |
 | `0x04` | `SCROLL` | `top_row:u8, bot_row:u8, count:i8, fill_color:u16` | Hardware region scroll (cell height tracked internally). |
 | `0x05` | `DRAW_IMAGE` | `x:u16, y:u16, w:u16, h:u16, rgb565_data:bytes` | Splash screens and compressed iconography. Pixel block is **big-endian RGB565** (high byte first), see [§2.3](../display-color.md). |
+| `0x06` | `SLEEP` | `none` | Coprocessor display sleep (DISPOFF/SLPIN, backlight off, 80MHz CPU). Wakes on next valid serial frame. |
 
