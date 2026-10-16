@@ -992,6 +992,105 @@ def test_atp_12() -> ATPResult:
 
 
 # -----------------------------------------------------------------------------
+# ATP-13: Three-Tier Power Profiles & Sensory Audio Overload Mitigation
+# -----------------------------------------------------------------------------
+def test_atp_13() -> ATPResult:
+    start_time = time.perf_counter()
+    assertions: list[AssertionResult] = []
+    err_msg = ""
+
+    try:
+        # 1. Power Profile Manager Validation (pi/bin/power-profile)
+        pwr_bin = REPO_ROOT / "pi" / "bin" / "power-profile"
+        res_pwr = subprocess.run([str(pwr_bin), "status", "--json"], capture_output=True, text=True)
+        assert res_pwr.returncode == 0
+        pwr_data = json.loads(res_pwr.stdout)
+        assert pwr_data["profile"] in ("active", "powersave", "airplane")
+        assert "spec" in pwr_data
+        assertions.append(
+            AssertionResult("Power profile CLI status returns valid JSON with 3-tier metrics", True)
+        )
+
+        # 2. Sensory Profile Manager & Overload Toggle (pi/bin/profile)
+        prof_bin = REPO_ROOT / "pi" / "bin" / "profile"
+        res_prof = subprocess.run([str(prof_bin), "status", "--json"], capture_output=True, text=True)
+        assert res_prof.returncode == 0
+        prof_data = json.loads(res_prof.stdout)
+        assert prof_data["profile"] in ("classroom", "office", "commute")
+        assertions.append(
+            AssertionResult("Sensory profile CLI status returns valid 3-preset environmental config", True)
+        )
+
+        # 3. Critical System State Alert Evaluation (whiskerframe.alerts)
+        from whiskerframe.alerts import AlertCategory, AlertSeverity, SystemMetrics, evaluate_alerts
+        # Nominal
+        assert len(evaluate_alerts(SystemMetrics(80.0, 45.0, 200.0))) == 0
+        # Battery critical (<=5%)
+        crit_events = evaluate_alerts(SystemMetrics(4.5, 45.0, 200.0))
+        assert any(e.category == AlertCategory.BATTERY and e.severity == AlertSeverity.CRITICAL for e in crit_events)
+        # Thermal warning (>=75°C)
+        therm_events = evaluate_alerts(SystemMetrics(80.0, 76.0, 200.0))
+        assert any(e.category == AlertCategory.THERMAL and e.severity == AlertSeverity.WARNING for e in therm_events)
+        # Memory critical (<50MB)
+        mem_events = evaluate_alerts(SystemMetrics(80.0, 45.0, 35.0))
+        assert any(e.category == AlertCategory.MEMORY and e.severity == AlertSeverity.CRITICAL for e in mem_events)
+        assertions.append(
+            AssertionResult("Alert engine evaluates battery, thermal, and memory boundaries", True)
+        )
+
+        # 4. Sensory overload instant mute enforcement
+        overload_suppressed = evaluate_alerts(
+            SystemMetrics(4.5, 82.0, 35.0),
+            sensory_state={"overload_active": True, "alerts_audible": False, "haptics_enabled": False},
+        )
+        assert len(overload_suppressed) == 3
+        assert all(not e.audible for e in overload_suppressed)
+        assert all(e.suppressed_by_profile for e in overload_suppressed)
+        assertions.append(
+            AssertionResult("Sensory overload mode instantly mutes all audible alert triggers", True)
+        )
+
+        # 5. High-contrast monochrome theme WCAG AAA compliance (mono-high-contrast.json)
+        from pi.terminal.theme import Theme, load_theme
+        theme = load_theme({"terminal": {"theme_file": "mono-high-contrast"}})
+        assert theme.bg == 0x0000
+        assert theme.fg == 0xFFFF
+        assert theme.cursor == 0xFFFF
+        assertions.append(
+            AssertionResult("High-contrast monochrome sunlight theme (REQ-ENV-03) verified", True)
+        )
+
+        # 6. Unified CLI (wf power, wf profile) formatting strictly <= 53 columns
+        wf_bin = REPO_ROOT / "pi" / "bin" / "wf"
+        for sub in (["power", "status"], ["profile", "status"], ["man", "power"], ["man", "profile"]):
+            r = subprocess.run([str(wf_bin)] + sub, capture_output=True, text=True)
+            assert r.returncode == 0
+            for line in r.stdout.splitlines():
+                assert len(line) <= 53, f"Line in 'wf {' '.join(sub)}' exceeded 53 cols: {line}"
+        assertions.append(
+            AssertionResult("Unified wf power & wf profile output strictly constrained to <=53 columns", True)
+        )
+
+    except Exception as exc:
+        err_msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+    all_passed = len(assertions) > 0 and all(a.passed for a in assertions) and not err_msg
+    return ATPResult(
+        atp_id="ATP-13-PWR-SENSORY-PROFILES",
+        number=13,
+        title="Three-Tier Power Profiles & Sensory Audio Overload Mitigation",
+        subsystem="Power & Sensory Core",
+        milestone="v0",
+        requirements=["REQ-PWR-01", "REQ-ENV-04", "REQ-INP-08", "REQ-INP-07", "REQ-ENV-03"],
+        tickets=["DEC-W21", "DEC-W17", "DEC-W19"],
+        passed=all_passed,
+        duration_s=time.perf_counter() - start_time,
+        assertions=assertions,
+        error_message=err_msg,
+    )
+
+
+# -----------------------------------------------------------------------------
 # Dispatch Table
 # -----------------------------------------------------------------------------
 ATP_REGISTRY: list[tuple[str, Callable[..., ATPResult]]] = [
@@ -1007,6 +1106,7 @@ ATP_REGISTRY: list[tuple[str, Callable[..., ATPResult]]] = [
     ("ATP-10", test_atp_10),
     ("ATP-11", test_atp_11),
     ("ATP-12", test_atp_12),
+    ("ATP-13", test_atp_13),
 ]
 
 

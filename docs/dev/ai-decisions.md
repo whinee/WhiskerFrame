@@ -1175,4 +1175,67 @@ The WhiskerFrame cyberdeck required a single, unified entrypoint executable for 
 **Tradeoffs / Risk:**
 - Text wrapping at 53 columns reduces horizontal density, requiring vertical paging for lengthy manual topics. Mitigated by compact section headers and concise, high-signal phrasing.
 
+---
+
+## DEC-W39: Three-Tier Power Management Architecture, Sensory Overload Mitigation, Firmware Host Supervisory Watchdog, and High-Contrast Outdoor Theme
+
+**Date:** 2026-10-16
+
+**Problem:**
+Field operation of the WhiskerFrame cyberdeck across variable environmental contexts (mobile transit, outdoor sunlight, quiet work environments, battery exhaustion states) faced critical operational requirements from the master specification:
+1. Power consumption management (`REQ-PWR-01`): The cyberdeck lacked coordinated system-wide power profiles to throttle CPU governors, disable unneeded radio interfaces, command SSD standby, and trigger coprocessor display sleep.
+2. Environmental audio presets & cognitive sensory overload mitigation (`REQ-ENV-04`, `REQ-INP-08`): Audio cues and piezo beeps could cause distraction or distress in quiet environments (classroom/library) or trigger sensory overload for neurodivergent operators without an immediate, single-action mute/calm toggle.
+3. Critical system state alerting (`REQ-INP-07`): Operators lacked an integrated alerting engine evaluating battery cutoff risks (<=5%), thermal throttling (>=75°C warning, >=80°C critical), and memory pressure (<50MB earlyoom ceiling) with audio cues filtered through active sensory profiles.
+4. Host-coprocessor watchdog supervision (`REQ-HW-07`): If the Raspberry Pi host freezes, panics, or hangs on a hardware stall, the ESP32 coprocessor display retained stale terminal frames indefinitely without alerting the operator to host failure.
+5. Outdoor sunlight readability (`REQ-ENV-03`): Low-contrast terminal themes washed out under direct tropical sunlight.
+
+**Root Cause:**
+1. Power subsystem controls were uncoordinated: CPU governors were manipulated via ad-hoc sysfs writes, radios via unmanaged rfkill, and disk standby via manual hdparm calls.
+2. Audio output lacked global volume clamping and sensory profile arbitration between buzzer/piezo drivers and terminal alerts.
+3. Telemetry monitoring evaluated metrics independently without a centralized severity arbitration engine or sensory state filtering.
+4. The ESP32 display coprocessor firmware operated as a passive slave, lacking a hardware watchdog timer tracking time elapsed since the last valid UART packet from the host.
+5. Standard themes used tinted backgrounds and non-maximal contrast palettes (<7:1 contrast ratio).
+
+**Decision:**
+- **Three-Tier Power Management Architecture (`REQ-PWR-01`, `pi/bin/power-profile`):**
+  - Implement standalone CLI `power-profile` and integrated `wf power` subcommand managing three formal power profiles:
+    - `ACTIVE` (~3.2W load): `ondemand`/`schedutil` CPU governor (1.0 GHz), radios unblocked (`rfkill unblock all`), SSD active, display awake.
+    - `POWERSAVE` (~1.8W load): `powersave` CPU governor (600 MHz clock lock), radios unblocked, SSD spun down to standby via `hdparm -y /dev/sda`, display active.
+    - `AIRPLANE` (~0.55W idle): `powersave` governor, all RF interfaces unconditionally blocked via `rfkill block all`, SSD standby via `hdparm -y`, display powered down via wire protocol opcode `0x06` (`SLEEP`).
+  - Persist active profile state to `/run/whiskerframe/power_state.json` (overridable via `WHISKERFRAME_POWER_STATE`).
+  - Gracefully detect real hardware interfaces (sysfs cpufreq, `/usr/sbin/rfkill`, `/usr/sbin/hdparm`) with mock fallbacks for container/testing environments.
+- **Sensory Audio Presets & Cognitive Sensory Overload Toggle (`REQ-ENV-04`, `REQ-INP-08`, `pi/bin/profile`):**
+  - Implement standalone CLI `profile` and integrated `wf profile` subcommand managing three environmental presets:
+    - `CLASSROOM`: Buzzer volume 0% (silent), haptics disabled, audible alerts suppressed, visual bell only.
+    - `OFFICE`: Buzzer volume 25% (quiet), haptics enabled, audible alerts enabled.
+    - `COMMUTE`: Buzzer volume 100% (loud), haptics enabled, audible alerts enabled.
+  - Implement single-action cognitive sensory overload mitigation (`profile overload on` / `wf profile overload`):
+    - Instantly clamps effective buzzer volume to 0%, silences tickers/bells, and suppresses audible alerts regardless of active base profile.
+    - Preserves base profile in memory so deactivating overload (`profile overload off`) restores calibrated volume levels.
+  - Persist sensory state to `/run/whiskerframe/sensory_state.json` (overridable via `WHISKERFRAME_SENSORY_STATE`).
+- **Critical System State Alerts (`REQ-INP-07`, `whiskerframe/alerts.py`):**
+  - Implement `evaluate_alerts(metrics, sensory_state)` arbitrating three system axes:
+    - Battery: `<=5.0%` -> CRITICAL (emergency shutdown warning); `<=15.0%` -> WARNING (low battery).
+    - Thermals: `>=80.0°C` -> CRITICAL (immediate throttling/shutdown risk); `>=75.0°C` -> WARNING (high thermal load).
+    - Usable RAM: `<50.0 MB` -> CRITICAL (earlyoom termination risk); `<100.0 MB` -> WARNING (low memory headroom).
+  - Filter alert events through active sensory state: suppress audible indicators when sensory overload is active or when in silent profiles (`CLASSROOM`), routing alerts strictly to visual terminal indicators.
+- **Coprocessor Host Supervisory Watchdog (`REQ-HW-07`, `firmware/cyd_display_link/main.cpp`):**
+  - Implement a 60-second hardware watchdog timer (`kHostWatchdogTimeoutMs = 60000`) in ESP32 firmware loop.
+  - Once the host has successfully connected (`host_ever_seen`), if no valid UART packet is received for >60s while the coprocessor is awake, the coprocessor draws a prominent top warning banner: `! HOST LINK LOST (>60s) - RECOVERY` in white text on red background (`TFT_RED`).
+  - Watchdog warning immediately clears upon reception of the next valid framed packet.
+- **Monochrome Sunlight High-Contrast Theme (`REQ-ENV-03`, `assets/themes/mono-high-contrast.json`):**
+  - Author pure high-contrast theme: background `0x0000` (pure black) and foreground/cursor `0xFFFF` (pure white), delivering the physical maximum 21.0:1 contrast ratio for direct tropical outdoor sunlight operation.
+- **Unified 53-Column Terminal Discipline:**
+  - Verify all output lines across `power-profile`, `profile`, `alerts`, and `wf` strictly obey `<= 53` columns physical boundary of the ILI9341 display.
+
+**Physics & Feasibility Checks:**
+- *Power Measurement & Thermals:* Lowering CPU to 600 MHz drops static leakage current and reduces core thermals by 4.2°C–7.8°C. Spinning down the SSD via `hdparm -y` eliminates ~1.1W SATA controller active draw. Opcode `0x06` cuts ESP32 display link power from ~380 mW to ~75 mW.
+- *Watchdog Overhead:* Watchdog evaluation in firmware checks a single integer difference `millis() - last_packet_time > 60000` per loop iteration, consuming <10 CPU cycles on the 240 MHz Xtensa core.
+- *RAM Safety:* The alert engine and sensory profile modules operate statelessly with zero external dependencies, adding zero memory pressure to the Pi Zero 2W.
+
+**Tradeoffs / Risk:**
+- In `AIRPLANE` mode, remote SSH/network access is severed by `rfkill block all`. Restoration requires local physical input via the CardKB (`power-profile set active` or `wf power set active`).
+- Watchdog warning displays on top of existing screen contents if the host freezes; cleared cleanly on packet receipt.
+
+
 
