@@ -1,0 +1,97 @@
+---
+# Tasks for netbird role.
+#
+# Cleanly installs NetBird client binary on arm64/armv7 Debian Trixie,
+# configures netbird.service with MemoryMax safety ceiling, and handles
+# unattended enrollment when vault_netbird_setup_key is provided.
+
+- name: Set up NetBird mesh VPN client
+  when: netbird_enabled | bool
+  tags: [netbird]
+  block:
+    - name: Ensure APT keyrings directory exists
+      ansible.builtin.file:
+        path: "{{ netbird_apt_key_path | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download NetBird APT signing key
+      ansible.builtin.get_url:
+        url: "{{ netbird_apt_key_url }}"
+        dest: "{{ netbird_apt_key_path }}"
+        mode: "0644"
+
+    - name: Configure NetBird APT repository (DEB822 sources format)
+      ansible.builtin.template:
+        src: netbird.sources.j2
+        dest: /etc/apt/sources.list.d/netbird.sources
+        mode: "0644"
+
+    - name: Remove legacy NetBird list file if present
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/netbird.list
+        state: absent
+
+    - name: Install NetBird client package
+      ansible.builtin.apt:
+        name: netbird
+        state: present
+        update_cache: true
+
+    - name: Ensure NetBird systemd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/netbird.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Install MemoryMax drop-in for netbird.service
+      ansible.builtin.template:
+        src: memory.conf.j2
+        dest: /etc/systemd/system/netbird.service.d/memory.conf
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart netbird
+
+    - name: Ensure netbird service is enabled and started
+      ansible.builtin.systemd:
+        name: netbird
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Resolve effective NetBird setup key
+      ansible.builtin.set_fact:
+        netbird_effective_setup_key: >-
+          {{
+            vault_netbird_setup_key
+            if (vault_netbird_setup_key is defined and (vault_netbird_setup_key | string | trim | length > 0))
+            else (netbird_setup_key | default(''))
+          }}
+
+    # Guard: Check if key is absent, empty, or unconfigured dummy example UUID
+    - name: Park NetBird enrollment if setup key is not provided
+      when: >
+        (netbird_effective_setup_key is not defined) or
+        (netbird_effective_setup_key | string | trim | length == 0) or
+        (netbird_effective_setup_key == '00000000-0000-0000-0000-000000000000')
+      ansible.builtin.debug:
+        msg: "NetBird staged: awaiting vault_netbird_setup_key (BLOCKED-ON-OPERATOR)"
+
+    - name: Activate NetBird enrollment (setup key provided)
+      when: >
+        (netbird_effective_setup_key is defined) and
+        (netbird_effective_setup_key | string | trim | length > 0) and
+        (netbird_effective_setup_key != '00000000-0000-0000-0000-000000000000')
+      block:
+        - name: Run netbird up with setup key
+          ansible.builtin.command: >
+            netbird up --setup-key {{ netbird_effective_setup_key }}
+            {% if (netbird_management_url | default('') | length > 0) %}--management-url {{ netbird_management_url }}{% endif %}
+          no_log: true
+          register: netbird_up_result
+          changed_when: "'Connected' in (netbird_up_result.stdout | default(''))"
+          failed_when:
+            - netbird_up_result.rc != 0
+            - "'already' not in (netbird_up_result.stderr | default('') | lower)"
+            - "'connected' not in (netbird_up_result.stderr | default('') | lower)"

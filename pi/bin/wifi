@@ -293,6 +293,7 @@ def parse_status_data(
     dev_show_out: str = "",
     wifi_list_out: str = "",
     conn_show_out: str = "",
+    connectivity: str = "",
 ) -> dict[str, Any]:
     """Parse NetworkManager status commands into structured info."""
     wifi_dev, wifi_state, active_conn = _parse_dev_status(dev_status_out)
@@ -321,6 +322,7 @@ def parse_status_data(
         "freq": freq,
         "is_5ghz": is_5ghz_freq(freq),
         "saved_connections": saved,
+        "connectivity": connectivity,
     }
 
 
@@ -339,6 +341,16 @@ def _format_active_status(data: dict[str, Any]) -> list[str]:
     sec = data.get("security")
     if sec:
         lines.append(f"Security:   {sec[:38] + '~' if len(sec) > 39 else sec}")
+
+    conn_chk = data.get("connectivity", "")
+    if conn_chk == "portal":
+        lines.append("Portal:     CAPTIVE PORTAL DETECTED!")
+    elif conn_chk == "full":
+        lines.append("Internet:   connected (full)")
+    elif conn_chk == "limited":
+        lines.append("Internet:   limited (no gateway/DNS)")
+    elif conn_chk == "none":
+        lines.append("Internet:   offline")
 
     ips = data.get("ip_addresses", [])
     if ips:
@@ -440,12 +452,15 @@ def cmd_status(_args: argparse.Namespace | None = None) -> int:
         ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ", "dev", "wifi", "list"],
     )
     p_conn = run_nmcli(["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"])
+    p_chk = run_nmcli(["networking", "connectivity", "check"])
+    connectivity = p_chk.stdout.strip().lower() if p_chk.returncode == 0 else ""
 
     data = parse_status_data(
         dev_status_out=p_stat.stdout,
         dev_show_out=p_show.stdout,
         wifi_list_out=p_wifi.stdout,
         conn_show_out=p_conn.stdout,
+        connectivity=connectivity,
     )
     for line in format_status(data):
         print_bounded(line)
@@ -623,6 +638,12 @@ def cmd_join(args: argparse.Namespace) -> int:
     if bool(net.get("is_5ghz", False)) and not _confirm_5ghz_join():
         print_bounded("Connection aborted.")
         return 1
+
+    if "802.1X" in sec or "EAP" in sec:
+        print_bounded(f"Notice: '{ssid}' uses 802.1X Enterprise security.")
+        print_bounded("Standard join cannot supply EAP identity credentials.")
+        print_bounded("Configure profile via nmcli or tether to phone hotspot.")
+        print_bounded("See docs/dev/network-access.md for 802.1X guidance.")
 
     password = _prompt_password(ssid, sec, args.password)
     return _execute_join_connect(ssid, sec, password, args.hidden)
