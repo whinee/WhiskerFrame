@@ -55,8 +55,17 @@ from .debug import tracepoint
 from .grid import Grid
 from .login import LoginState, SubmitEvent, authenticate
 from .login_view import render_login
+from .status_bar import StatusBar
 from .theme import Theme, load_theme
 from .vt import VTEmulator
+from .workspaces import (
+    DEFAULT_MAX_WORKSPACES,
+    WORKSPACE_DIRECT_CHORDS,
+    WORKSPACE_NEXT_CHORD,
+    WORKSPACE_PREV_CHORD,
+    Workspace,
+    WorkspaceManager,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -67,12 +76,19 @@ __all__ = [
     "CTRL_LATCH_CHORD",
     "CTRL_LATCH_CHORDS",
     "CTRL_LATCH_TIMEOUT_S",
+    "DEFAULT_MAX_WORKSPACES",
     "RESIZE_CHORD",
     "RESIZE_CHORDS",
     "RESIZE_SIZES",
+    "WORKSPACE_DIRECT_CHORDS",
+    "WORKSPACE_NEXT_CHORD",
+    "WORKSPACE_PREV_CHORD",
     "BridgeConfig",
     "KeyQueue",
+    "StatusBar",
     "TerminalBridge",
+    "Workspace",
+    "WorkspaceManager",
 ]
 
 CTRL_LATCH_CHORD: int = 0x8C
@@ -220,6 +236,8 @@ class BridgeConfig:
     splash_rgb565: str = ""
     theme: Theme = field(default_factory=load_theme)
     demo_mode: bool = False
+    status_bar_enabled: bool = True
+    status_bar_position: str = "top"
 
 
 def _tiocswinsz(fd: int, geometry: TerminalGeometry) -> None:
@@ -274,6 +292,7 @@ class TerminalBridge:
         """
         self._config = config
         self._theme: Theme = config.theme
+        os.environ["TERM"] = "xterm"
         self._font_size = self._valid_font_size(config.font_size)
         self._geometry = TerminalGeometry.for_font_size(self._font_size)
         self._transport: SerialTransport | None = None
@@ -597,8 +616,10 @@ class TerminalBridge:
         `tuple[int, int]`: The ``(pid, master_fd)`` of the child shell.
 
         """
+        os.environ["TERM"] = "xterm"
         pid, master_fd = pty.fork()
         if pid == 0:  # pragma: no cover - runs only in the forked child
+            os.environ["TERM"] = "xterm"
             # Emit immediate greeting banner to PTY before execing su
             greeting = f"\033[1;36mWelcome back, {user}!\033[0m\r\n\r\n".encode("latin-1")
             os.write(1, greeting)
@@ -633,7 +654,7 @@ class TerminalBridge:
         self._clear_panel()
         self._prev = None  # force full repaint of shell screen over a cleared panel
         pid, master_fd = self._spawn_shell(user)
-        session = _ShellSession(self, master_fd, keys)
+        session = _ShellSession(self, master_fd, keys, user=user, initial_pid=pid)
         try:
             session.pump()
         finally:
@@ -693,17 +714,20 @@ class TerminalBridge:
         if master_fd is not None:
             _tiocswinsz(master_fd, self._geometry)
         self._prev = None
+        self._clear_panel()
         tracepoint(
             "terminal.resize",
             font_size=self._font_size,
             cols=self._geometry.cols,
         )
-        return Grid(
+        grid = Grid(
             self._geometry.cols,
             self._geometry.rows,
             self._theme.fg,
             self._theme.bg,
         )
+        grid.dirty = True
+        return grid
 
     # -- top-level loop -------------------------------------------------------
 
@@ -774,6 +798,10 @@ class _ShellSession:
         bridge: TerminalBridge,
         master_fd: int,
         keys: KeyQueue,
+        status_bar: StatusBar | None = None,
+        user: str = "whisker",
+        initial_pid: int = 0,
+        max_workspaces: int = DEFAULT_MAX_WORKSPACES,
     ) -> None:
         """
         Initialize a shell session pump over an open PTY master.
@@ -782,11 +810,16 @@ class _ShellSession:
         - bridge (`TerminalBridge`): The owning bridge (serial, geometry, paint).
         - master_fd (`int`): The PTY master descriptor.
         - keys (`KeyQueue`): The non-blocking CardKB key queue to drain.
+        - status_bar (`StatusBar | None`, optional): Optional status bar instance.
+        - user (`str`, optional): Authenticated shell user. Defaults to "whisker".
+        - initial_pid (`int`, optional): Child shell PID. Defaults to 0.
+        - max_workspaces (`int`, optional): Workspace ceiling. Defaults to 4.
 
         """
         self._bridge = bridge
         self._master_fd = master_fd
         self._keys = keys
+        self._user = user
         self._grid = Grid(
             bridge._geometry.cols,
             bridge._geometry.rows,
@@ -798,19 +831,43 @@ class _ShellSession:
         self._ctrl_armed: bool = False
         self._ctrl_armed_at: float = 0.0
 
+        if status_bar is not None:
+            self._status_bar: StatusBar | None = status_bar
+        else:
+            config = getattr(bridge, "_config", None)
+            if isinstance(config, BridgeConfig) and config.status_bar_enabled:
+                self._status_bar = StatusBar(
+                    theme=bridge._theme,
+                    position=config.status_bar_position,
+                )
+            else:
+                self._status_bar = None
+
+        self._workspaces = WorkspaceManager(
+            bridge=bridge,
+            user=user,
+            max_workspaces=max_workspaces,
+            spawn_fn=getattr(bridge, "_spawn_shell", None),
+        )
+        ws = self._workspaces.create_workspace(
+            ws_id=1,
+            name="1",
+            user=user,
+            initial_fd=master_fd,
+            initial_pid=initial_pid,
+        )
+        ws.grid = self._grid
+        ws.emulator = self._emulator
+
     def _arm_ctrl(self) -> None:
-        """
-        Arm the sticky Ctrl latch, recoloring cursor yellow and setting NeoPixel.
-        """
+        """Arm sticky Ctrl latch, recoloring cursor yellow and setting NeoPixel."""
         self._ctrl_armed = True
         self._ctrl_armed_at = time.monotonic()
         self._bridge.set_ctrl_led(True)
         self._paint_session()
 
     def _disarm_ctrl(self, repaint: bool = True) -> None:
-        """
-        Disarm the sticky Ctrl latch, clearing NeoPixel and resetting cursor.
-        """
+        """Disarm sticky Ctrl latch, clearing NeoPixel and resetting cursor."""
         if self._ctrl_armed:
             self._ctrl_armed = False
             self._bridge.set_ctrl_led(False)
@@ -855,6 +912,7 @@ class _ShellSession:
         `None`: Returns when the shell session ends.
 
         """
+        self._workspaces.start_ipc_server()
         self._drain_startup()
         self._paint_session()
         running = True
@@ -865,6 +923,7 @@ class _ShellSession:
                 self._is_ctrl_armed()
                 self._maybe_keyframe()
         finally:
+            self._workspaces.close_all()
             self._disarm_ctrl(repaint=False)
 
     def _paint_session(self) -> None:
@@ -887,7 +946,29 @@ class _ShellSession:
             cursor_fg=self._bridge._theme.bg,
             cursor_bg=cursor_bg,
         )
+        if self._status_bar is not None:
+            self._status_bar.set_ctrl_latch(self._ctrl_armed)
+            self._status_bar.render_to_grid(display_grid)
         self._bridge._paint(display_grid)
+        if self._grid.dirty:
+            self._grid.dirty = False
+
+    def _dispatch_readable_fds(self, readable: list[int]) -> None:
+        for fd in readable:
+            if self._workspaces.is_ipc_fd(fd):
+                self._workspaces.handle_ipc_fd(fd)
+            else:
+                self._workspaces.read_pty_fd(fd, ctrl_armed=self._ctrl_armed)
+
+    def _sync_active_ws(self) -> None:
+        self._workspaces.cleanup_dead_sessions()
+        ws = self._workspaces.active_workspace
+        if ws is not None:
+            self._master_fd = ws.master_fd
+            self._grid = ws.grid
+            self._emulator = ws.emulator
+            if self._status_bar is not None:
+                self._status_bar.workspace = ws.id
 
     def _read_pty(self, timeout_s: float = _POLL_TIMEOUT_S) -> bool:
         """
@@ -900,9 +981,16 @@ class _ShellSession:
         `bool`: ``True`` if the shell is still running, ``False`` on EOF/error.
 
         """
-        if not self._select_pty(timeout_s):
-            return True
-        return self._fetch_and_feed_pty()
+        read_fds = self._workspaces.get_read_fds()
+        if not read_fds:
+            return False
+        try:
+            readable, _, _ = select.select(read_fds, [], [], timeout_s)
+        except OSError as err:
+            return err.errno in (errno.EAGAIN, errno.EINTR)
+        self._dispatch_readable_fds(readable)
+        self._sync_active_ws()
+        return self._workspaces.has_alive_workspaces()
 
     def _select_pty(self, timeout_s: float) -> bool:
         """
@@ -960,9 +1048,65 @@ class _ShellSession:
             return bytes((key,))
         return None
 
+    def switch_workspace(self, ws_id: int) -> bool:
+        """Switch active workspace, syncing state and repainting."""
+        ok = self._workspaces.switch_workspace(ws_id)
+        self._sync_active_ws()
+        if ok:
+            self._paint_session()
+        return ok
+
+    def next_workspace(self) -> int:
+        """Switch to next active workspace."""
+        new_id = self._workspaces.next_workspace()
+        self._sync_active_ws()
+        self._paint_session()
+        return new_id
+
+    def prev_workspace(self) -> int:
+        """Switch to previous active workspace."""
+        prev_id = self._workspaces.prev_workspace()
+        self._sync_active_ws()
+        self._paint_session()
+        return prev_id
+
+    def _handle_workspace_chord(self, key: int) -> bool | None:
+        if key in WORKSPACE_DIRECT_CHORDS:
+            self._disarm_ctrl(repaint=False)
+            self.switch_workspace(WORKSPACE_DIRECT_CHORDS[key])
+            return True
+        if key == WORKSPACE_NEXT_CHORD:
+            self._disarm_ctrl(repaint=False)
+            self.next_workspace()
+            return True
+        if key == WORKSPACE_PREV_CHORD:
+            self._disarm_ctrl(repaint=False)
+            self.prev_workspace()
+            return True
+        return None
+
+    def _handle_resize_chord(self) -> bool:
+        self._disarm_ctrl(repaint=False)
+        self._grid = self._bridge._rebuild_geometry(self._master_fd)
+        self._emulator = VTEmulator(self._grid, self._bridge._theme)
+        if hasattr(self, "_workspaces") and self._workspaces:
+            self._workspaces.rebuild_geometry(self._bridge._geometry)
+            if self._workspaces.active_workspace:
+                self._grid = self._workspaces.active_workspace.grid
+                self._emulator = self._workspaces.active_workspace.emulator
+        self._paint_session()
+        return True
+
+    def _handle_latch_chord(self) -> bool:
+        if self._is_ctrl_armed():
+            self._disarm_ctrl(repaint=True)
+        else:
+            self._arm_ctrl()
+        return True
+
     def _handle_chord(self, key: int) -> bool | None:
         """
-        Handle resize or Ctrl latch chords, returning bool if handled.
+        Handle resize, Ctrl latch, or workspace chords, returning bool if handled.
 
         Args:
         - key (`int`): Key byte to check against registered chords.
@@ -972,21 +1116,10 @@ class _ShellSession:
 
         """
         if key in RESIZE_CHORDS:
-            if self._ctrl_armed:
-                self._disarm_ctrl(repaint=False)
-            self._grid = self._bridge._rebuild_geometry(self._master_fd)
-            self._emulator = VTEmulator(self._grid, self._bridge._theme)
-            self._paint_session()
-            return True
-
+            return self._handle_resize_chord()
         if key in CTRL_LATCH_CHORDS:
-            if self._is_ctrl_armed():
-                self._disarm_ctrl(repaint=True)
-            else:
-                self._arm_ctrl()
-            return True
-
-        return None
+            return self._handle_latch_chord()
+        return self._handle_workspace_chord(key)
 
     def _consume_latch_payload(self, key: int) -> bytes | None:
         """

@@ -173,6 +173,10 @@ def load_bridge_config() -> BridgeConfig:
     login = terminal.get("login", {}) or {}
     login = login if isinstance(login, dict) else {}
     demo_mode = bool(login.get("demo_mode", "guest" in users))
+    status_bar_cfg = terminal.get("status_bar", {}) or {}
+    status_bar_cfg = status_bar_cfg if isinstance(status_bar_cfg, dict) else {}
+    status_bar_enabled = bool(status_bar_cfg.get("enabled", True))
+    status_bar_position = str(status_bar_cfg.get("position", "top"))
     resolved = BridgeConfig(
         serial_port=str(terminal.get("serial_port", "/dev/ttyUSB0")),
         baud=_as_int(terminal.get("baud"), 115200),
@@ -186,6 +190,8 @@ def load_bridge_config() -> BridgeConfig:
         splash_rgb565=_resolve_splash_path(terminal),
         theme=load_theme(config),
         demo_mode=demo_mode,
+        status_bar_enabled=status_bar_enabled,
+        status_bar_position=status_bar_position,
     )
     tracepoint(
         "terminal.config",
