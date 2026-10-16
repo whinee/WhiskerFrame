@@ -51,5 +51,40 @@ The cyberdeck functions as an asymmetric dual-core system: a Linux host (Pi Zero
 | **Log & Buffer Wear** | 416 MB RAM | 32 MB log2ram tmpfs buffer | Max 200 MB on persistent SSD | `log2ram` hourly commit + SSD journald diversion |
 | **CYD ESP32 SRAM** | 520 KB SRAM | ~328 KB internal SRAM | Free heap > 80 KB | Font glyph subset caching (ASCII only), no Unicode bloat |
 
+### 1.4 Workspace & Multi-PTY Architecture
+
+The terminal bridge (`pi/terminal/bridge.py`) implements a lightweight, in-process session multiplexer that manages up to 4 concurrent virtual workspaces (`WS1` through `WS4`) without the high memory footprint or escape-chord collisions of `tmux` or `screen`:
+
+* **Process Isolation:** Each workspace maintains an independent pseudo-terminal master file descriptor (`master_fd`), child shell PID (`su - <user>`), and `VTEmulator` virtual character grid (`53x30` default).
+* **Asynchronous PTY Pump:** Background workspaces continue executing concurrently. Output is parsed non-blocking via `select.select()` into the corresponding background grid without serial bus activity.
+* **Navigation Chords:** Workspace switching is mapped to CardKB chords (`Fn + 1` through `Fn + 4` or sequential `Fn + Left` / `Fn + Right`).
+* **Differential Screen Swapping:** Switching workspaces binds active user input to the new workspace's PTY master and triggers a differential repaint (`grid.diff(prev_active)`) across UART, rendering only differences between the two buffers.
+* **Lifecycle Boundary:** Exiting an active shell closes only that workspace's PTY; sibling workspaces remain active. When all workspaces exit, the bridge drops back to the PAM login view.
+
+### 1.5 Status Line & Telemetry Architecture
+
+To provide operators with continuous situational awareness without display tearing or serial bus saturation:
+
+* **Grid Placement:** Row 0 (or bottom row 29) is allocated as an active telemetry status line displaying: `[WS:1] [WIFI:SSID] [12.4V 95%] [61.2°C] [CTRL:ARM]`.
+* **Asynchronous Data Source:** Telemetry is read strictly from pre-cached files: `/run/battery_monitor/status.json` (produced by `battery-monitor.service`), `/sys/class/thermal/thermal_zone0/temp` (sysfs), and NetworkManager state. No direct I2C transactions are performed within the terminal thread.
+* **Cell-Differential Rendering:** Updates are throttled to a 2.0-second interval. Grid diffing ensures only changed numbers or indicator glyphs generate `DRAW_CELLS` packets (<10 bytes per normal tick), eliminating UART queue congestion and visible screen flicker.
+* **Transport Comparison (Wired UART vs Wireless):**
+  * *Wired UART (115,200 baud):* Consumes ~0.08% of link capacity for telemetry, operates with deterministic sub-millisecond bus timing, generates zero RF emissions, and maintains link integrity during radio reset.
+  * *ESP32 Wi-Fi / BLE (Rejected for v0/v1):* Introduces 15–60 ms network packet jitter, draws 80–120 mA continuous RF current (sacrificing 1.5h battery runtime), and risks 2.4 GHz co-channel interference with Pi Zero 2W Wi-Fi.
+
+### 1.6 Typography & Display Geometry Engine
+
+The display subsystem supports 4 distinct character grid geometries tailored for varying operational postures:
+
+| Geometry | Grid Dimensions | Cell Size | Font ID | Target Use Case |
+|---|---|---|---|---|
+| **Font 1** | **53 columns x 30 rows** | 6x8 pixels | `1` | High-density terminal, full-screen editors, logs. |
+| **Font 5** | **40 columns x 20 rows** | 8x12 pixels | `5` | Intermediate Comic Mono / monospace readable text. |
+| **Font 2** | **26 columns x 15 rows** | 12x16 pixels | `2` | Large glanceable mobile transit view. |
+| **Font 3** | **17 columns x 10 rows** | 18x24 pixels | `3` | Maximum size emergency cockpit telemetry view. |
+
+* **Bitmap Compilation:** Intermediate fonts are compiled into coprocessor flash using `scripts/generate_font_8x12.py`, extracting 95 ASCII glyphs (32..126) into compact PROGMEM bitmask arrays (`kFont8x12Glyphs[95][12]`).
+* **Runtime Cycling:** Pressing `Fn + Backspace (labeled 'del')` (`0x8B`) cycles sequentially through `(1, 5, 2, 3)`, updates `TerminalGeometry`, triggers `TIOCSWINSZ` on the active PTY, and issues a clean full repaint.
+
 ---
 

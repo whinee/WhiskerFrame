@@ -9,10 +9,10 @@ This document formalizes the product requirements for the WhiskerFrame Cyberdeck
 The WhiskerFrame engineering specification is partitioned into a three-document triad:
 
 1. **`docs/specifications/architecture.md`**: Defines *system topology*, physical/electrical node matrices, hardware interfaces, protocol contracts, and RAM/swap memory budgets.
-2. **`docs/specifications/tasks.md`**: Defines *implementation status* and tracking for engineering work packages (TSK-01 through TSK-16) across delivery waves.
+2. **`docs/specifications/tasks.md`**: Defines *implementation status* and tracking for engineering work packages (TSK-01 through TSK-23) across delivery waves.
 3. **`docs/specifications/product-requirements.md` (this document)**: Defines *formal normative requirements* (`REQ-*`) tagged with release targets (`v0`, `v1`, `v2+`) and explicit physics/engineering arithmetic.
 
-Supporting domain contracts reside in `contracts/wire-protocol.md` (serial framing), `terminal.md` (TUI & input line discipline), `storage-mount.md` (BTRFS generator), `display-color.md` (RGB565 encoding), and `orchestration.md` (agent boundaries). Architectural decisions (WHY) are chronologically recorded in `docs/dev/ai-decisions.md` (DEC-W1 through DEC-W30).
+Supporting domain contracts reside in `contracts/wire-protocol.md` (serial framing), `terminal.md` (TUI & input line discipline), `storage-mount.md` (BTRFS generator), `display-color.md` (RGB565 encoding), and `orchestration.md` (agent boundaries). Architectural decisions (WHY) are chronologically recorded in `docs/dev/ai-decisions.md` (DEC-W1 through DEC-W37).
 
 ---
 
@@ -52,8 +52,12 @@ Supporting domain contracts reside in `contracts/wire-protocol.md` (serial frami
 
 * **REQ-TERM-01 [v0] (CYD Display Interface)**: The terminal display MUST be driven by an ESP32-2432S028 (CYD) module running an ILI9341 320x240 LCD over USB-Serial (CH340) at 115200 baud runtime, locked exclusively by `terminal.service`. (DEC-W5, DEC-W14).
 * **REQ-TERM-02 [v0] (53-Column VT100 Character Grid)**: The host Python bridge (`whiskerframe.terminal`) MUST maintain terminal state via a 53-column by 30-row VT100 grid emulator (6x8 font cells), transmitting incremental cell runs (`DRAW_CELLS`, opcode `0x03`) to minimize UART bandwidth. (DEC-W6, DEC-W29).
-* **REQ-TERM-03 [v1] (Intermediate Typography & 8x12 Font)**: The firmware MUST support compile-time intermediate font geometries (e.g. 8x12 font yielding 40 columns by 20 rows) using anti-aliased bitmap fonts to improve legibility over raw 6x8 bitmap scaling. (DEC-W30).
+* **REQ-TERM-03 [v1] (Intermediate Typography & 8x12 Font)**: The firmware MUST support compile-time intermediate font geometries (e.g. 8x12 font yielding 40 columns by 20 rows) using anti-aliased bitmap fonts to improve legibility over raw 6x8 bitmap scaling. (DEC-W30, DEC-W32, TSK-18).
 * **REQ-TERM-04 [v0] (Compact Interactive Prompts)**: Interactive shell prompts in the CYD terminal MUST NOT exceed 3 characters (`n~ ` for neko, `g~ ` for guest, `r# ` for root) via `/etc/profile.d/cyd_prompt.sh`, preventing line-wrap truncation on the 53-column display. (DEC-W30).
+* **REQ-TERM-05 [v0] (Lightweight Multi-PTY Workspaces)**: The terminal bridge MUST support multiplexing up to 4 concurrent virtual workspaces (`WS1` through `WS4`) mapped to CardKB chords (`Fn+1`..`4`), maintaining isolated PTY master file descriptors and child shells while consuming <100 KB total RAM. (DEC-W36, TSK-22).
+* **REQ-TERM-06 [v0] (Low-Flicker Telemetry Status Line)**: The terminal interface MUST provide a dedicated telemetry status line on row 0/29 updated at a throttled 2.0s cadence using cell-differential rendering (`grid.diff`) consuming <10 bytes per normal tick, reading asynchronously from cached telemetry files without direct I2C bus stalls. (DEC-W37, TSK-23).
+* **REQ-TERM-07 [v0] (Coprocessor Binary Image Blitting)**: The display subsystem MUST support blitting raw binary RGB565 images (`0x05 DRAW_IMAGE`) using bounded scanline chunk streaming (2 rows, 1,280 bytes) and safe post-render grid repainting, preventing coprocessor FIFO overrun and character corruption. (DEC-W35, TSK-21).
+* **REQ-TERM-08 [v0] (Standardized xterm Emulation & Clean Clear)**: The terminal emulator MUST standardize on `TERM=xterm`, support 16-color ANSI rendering, and execute full blank-wash refreshes on `clear` (`\x1b[2J`) without dirty cell persistence. (DEC-W31, TSK-17).
 
 ---
 

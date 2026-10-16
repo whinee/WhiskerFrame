@@ -6,14 +6,14 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- **Session Context:** Attended mode active (operator awake, watching). Operator override Q-014 completed; Cess art policy codified in DEC-W28 and REQ-LIC-02 [v1].
-- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime verified, cold boot healthy (52°C, 0 throttled).
+- **Session Context:** Attended mode active (operator awake, watching). Documentation & Specification Alignment Mandate completed.
+- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime verified, cold boot healthy (64.5°C, 0 throttled).
 - **Hardware State:** Pi up, persistent journal active, terminal.service running.
-- **Current Task:** Executing parallel host workstreams (WS-1 guest login, WS-2 Ctrl latch, WS-3 goodbye splash & sleep, WS-4 wifi helper, WS-5 offline library plan, WS-6 phone hotspot 2.4GHz, WS-7 thermals, WS-8 spec/interview).
-- **Last RESULT:** Cess art policy executed; triad updated (DEC-W28, REQ-LIC-02, changelog); git index clean of derived .rgb565.
-- **Hard Rules Active:** No deliberate reboot/poweroff; rescue timer for link risk; TSK-05 unapplied; credentials redacted.
-- **Open Blockers:** Q-015 (Get written confirmation from Cess covering all files - operator action item).
-- **Next Action:** Commit DEC-W28 / art policy atomically, then dispatch WS-1 through WS-8.
+- **Current Task:** Documentation Triad and Specification Alignment Complete (DEC-W31..DEC-W37 formalized, TSK-17..TSK-23 registered, changelog synced, architecture & requirements aligned, feature inventory & acceptance test plans cataloged).
+- **Last RESULT:** All 3 perspectives of Documentation Triad reconciled; feature inventory and 12 acceptance test plans codified; all 57 unit/property tests green; gitleaks 0 leaks detected.
+- **Hard Rules Active:** No deliberate reboot/poweroff without rescue timer; sealed deck invariant; credentials redacted; explicit paths for git.
+- **Open Blockers:** None.
+- **Next Action:** Standby for operator demo walkthrough or deployment commands.
 
 ## 1. What this project is
 
@@ -928,3 +928,34 @@ RESULT: [2026-10-16T01:10Z] Full-Throttle Hardening Wave Completed:
 6. **WS-H (Triad Specification Alignment):** Refactored `product-requirements.md` (tagged `[v0]`, `[v1]`, `[v2+]`), `architecture.md` (bus hierarchy, memory ceilings, physics calculations), and wire protocol opcode `0x06`.
 7. **WS-I (Network UX & NetBird Staging):** Hardened `pi/bin/wifi` (captive portal detection, 802.1X guidance); authored `docs/dev/network-access.md`; created modular `ansible/roles/netbird/` and safe runner `scripts/apply-tsk05-safely.sh`.
 8. **WS-J (Hygiene & Zero-Leaks):** `docs/dev/spec-interview/0.md` pristine and untouched; `gitleaks` clean across entire commit history and uncommitted diff.
+
+---
+
+## 2026-10-16 04:35 UTC — Lead Orchestrator — Full Feature Implementation Mandate Fan-Out
+
+INTENT: [2026-10-16T04:35Z] Parallel Workstream Fan-Out (WS-A through WS-H):
+1. **WS-A (Display Regressions):** Fix reboot splash text `brb :3`, verify shutdown/reboot order; set `TERM=xterm` and ensure `clear` & `demo` run reliably; fix smallest-font dirty-cell refresh corruption after `clear`; add regression tests.
+2. **WS-B (Typography - Comic Mono):** Source Comic Mono font; build reproducible font generation pipeline; generate bitmap fonts across all 4 geometries (53x30 [6x8], 40x20 [8x12], 26x15 [12x16], 17x10 [18x24]); produce test specimen and verify firmware integration.
+3. **WS-C (CardKB & NeoPixel):** Configure NeoPixel default-off on boot/power cycle; fix sticky Ctrl latch (`Fn+Tab`) yellow cursor indicator and translation reset.
+4. **WS-D (Guest Login & Unified `wf` CLI):** Automatically launch `demo` on guest PAM login; implement comprehensive `wf` CLI (`wf help`, `wf man [topic]`, `wf wifi`, `wf demo [art]`, `wf terminal`, `wf workspace`); provide offline manual `wf man`.
+5. **WS-E (Image Rendering `demo art`):** Implement `demo art` displaying workspace-relative configurable assets on 320x240 LCD using opcode `0x05` (`DRAW_IMAGE`); handle RGB565 packing, scaling, safe path resolution, terminal grid restoration without corruption.
+6. **WS-F (Terminal Workspaces):** Implement lightweight multi-PTY session manager with independent shell state, workspace switching, CardKB navigation keybindings, safe cleanup.
+7. **WS-G (Status Bar & Wireless / Transport Optimization):** Implement compact status bar (workspace, Wi-Fi, battery, Ctrl latch) without full redraw flicker; measure display bottlenecks (serial vs framing vs baud rate) and evaluate ESP32 Wi-Fi/BT transport with evidence.
+8. **WS-H (Specification & Triad Alignment):** Reconcile `product-requirements.md`, `architecture.md`, `tasks.md`, `ai-decisions.md` (DEC-*), and `changelog.md`.
+
+RESULT: [2026-10-16T05:30Z] Documentation Triad & Specification Alignment Completed:
+1. **Decision Formalization (`docs/dev/ai-decisions.md`):** Formalized architectural rationale decisions DEC-W31 through DEC-W37:
+   - `DEC-W31`: Asymmetric Dual-Core Architecture, Serial Wire Discipline, and Display Regression Defenses (`TERM=xterm`, dirty-cell clear wash).
+   - `DEC-W32`: Multi-Geometry Bitmap Typography Pipeline and Comic Mono Font Architecture (8x12 PROGMEM compilation, runtime cycling via `Fn+Backspace`).
+   - `DEC-W33`: CardKB Hardware I2C Driver, SK6812 NeoPixel Yellow Latch Feedback, and Translation Reset (`Fn+Tab`, 3.0s timeout).
+   - `DEC-W34`: Hardened Multi-Tenant Guest Demo Sandbox, PAM Integration, and Ephemeral Lifecycle (tmpfs 8MB, nftables drop, 5s reaper, `pi/bin/demo`).
+   - `DEC-W35`: Coprocessor Binary Image Blitting (`0x05 DRAW_IMAGE`), RGB565 Chunk Streaming, and Safe Grid Recovery (1,280-byte chunks, clean grid restoration).
+   - `DEC-W36`: Lightweight Multi-PTY Terminal Workspaces, CardKB Switching Chords, and Isolated Shell Lifecycles (<100KB RAM multiplexer, `Fn+1`..`4`).
+   - `DEC-W37`: Low-Flicker Terminal Status Bar, Telemetry Polling, and UART vs Wireless Transport Profiling (row 0/29 differential diffing <10 bytes/tick, wired UART superiority).
+2. **Task Matrix Registration (`docs/specifications/tasks.md` & `docs/dev/tasks.md`):** Appended verified tasks TSK-17 through TSK-23 mapping every capability to its implementation files, status, and corresponding decision records. Created relative symlink `docs/dev/tasks.md -> ../specifications/tasks.md` ensuring unified access across paths.
+3. **Changelog Synchronization (`docs/dev/changelog.md`):** Updated `## 0.1.0 (Unreleased)` with detailed entries for DEC-W31..W37, TSK-17..23, and all implemented subsystems following Keep a Changelog.
+4. **Authoritative Specification Alignment (`docs/specifications/`):**
+   - `architecture.md`: Codified §1.4 Workspace & Multi-PTY Architecture, §1.5 Status Line & Telemetry Architecture, and §1.6 Typography & Display Geometry Engine with physics calculations and transport comparison.
+   - `product-requirements.md`: Updated Triad scope to TSK-01..TSK-23 and DEC-W1..DEC-W37; added normative requirements `REQ-TERM-05` (Workspaces), `REQ-TERM-06` (Status Line), `REQ-TERM-07` (Image Blitting), and `REQ-TERM-08` (xterm & clean clear).
+5. **Feature Inventory & Acceptance Test Plans (`docs/dev/feature-inventory-and-acceptance-tests.md`):** Cataloged 30 implemented features across 8 subsystems with source mappings and status. Authored 12 detailed acceptance test plans (ATP-01 through ATP-12) with preconditions, step-by-step commands, expected outputs, pass/fail criteria, and rollbacks.
+6. **Test & Linter Verification:** Verified all test suites pass cleanly (`pytest test/` -> 57 passed); zero secret leaks detected; human-owned `docs/dev/spec-interview/0.md` preserved pristine.

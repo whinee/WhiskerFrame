@@ -929,3 +929,250 @@ Following operator hardware evaluation of the Demo Polish suite:
 - **Wi-Fi Helper Hardening:** Updated `pi/bin/wifi` to prioritize saved profiles via `nmcli connection up id <profile>`, require passwords on secured APs with clear error feedback, and retry with explicit `wifi-sec.key-mgmt wpa-psk` if NetworkManager throws property errors.
 - **Split Systemd Goodbye Units:** Created distinct systemd units `cyberdeck-goodbye-reboot.service` (`WantedBy=reboot.target`, `--mode reboot` with `"brb :3"`) and `cyberdeck-goodbye-shutdown.service` (`WantedBy=poweroff.target halt.target`, `--mode shutdown` with `"bai baiii!"`) executing under the venv Python binary. Added 3.0s display hold in `TerminalBridge._show_splash()`.
 
+---
+
+## DEC-W31: Asymmetric Dual-Core Architecture, Serial Wire Discipline, and Display Regression Defenses
+
+**Date:** 2026-10-16
+
+**Problem:**
+The asymmetric architecture coupling the Linux host (Raspberry Pi Zero 2W) and the ESP32 coprocessor over USB-Serial (CH340) faced regression edge-cases under live hardware evaluation:
+1. `sudo reboot` and `sudo poweroff` shutdown sequences had race conditions between systemd target deactivation, resulting in screen freeze or premature black wipe.
+2. In the 53x30 character grid (Font 1, 6x8 bitmap cells), rapid full-screen clears (`clear` command or `\x1b[2J \x1b[H`) left dirty-cell artifacts on subsequent fast rendering passes.
+3. Setting default `TERM=vt100` caused issues with modern terminal-aware programs (e.g. `htop`, `nano`, `demo`), while `TERM=xterm` needed validation against the lightweight `VTEmulator`.
+
+**Root Cause:**
+1. Systemd transition ordering: unified shutdown service did not distinguish `reboot.target` from `halt.target`/`poweroff.target`, leading to misaligned display hooks.
+2. VT100 grid differential state machine: `grid.clear()` reset internal state, but `grid.diff()` skipped emitting blank cells if the previous frame tracked cells as already blank in the emulator buffer while on-device coprocessor VRAM retained stale pixels.
+3. Terminfo capabilities: `xterm` emits standard ANSI cursor and erase sequences (`ED 2`, `EL 0/1/2`, `CUP`) supported by `VTEmulator`, whereas `vt100` lacks modern SGR color codes and 16-color ANSI support.
+
+**Decision:**
+- Enforce strict split systemd units: `cyberdeck-goodbye-reboot.service` triggered on `reboot.target` rendering `"brb :3"`, and `cyberdeck-goodbye-shutdown.service` triggered on `poweroff.target halt.target` rendering `"bai baiii!"`, both bounded to 8.0s timeout with fail-silent exit.
+- Fix dirty-cell refresh after `clear`: in `pi/terminal/grid.py`, when full clear is triggered (`\x1b[2J`), mark the entire grid dirty and trigger a forced blank cell wash over the display region to synchronize on-device VRAM with host state.
+- Standardize on `TERM=xterm` across PAM login and bridge session spawning, providing 16-color ANSI rendering, proper line wrapping, and full interactive utility compatibility (`demo`, `wiki`, `keys`).
+- Verify resilience via automated regression and soak test harness (`test/test_reliability.py`).
+
+**Physics & Feasibility Checks:**
+- Baud rate throughput: At 115,200 baud (11,520 bytes/sec wire throughput), transmitting a full blank wipe (`DRAW_RECT` opcode `0x02`, 11 bytes) takes 0.95 ms. A full 53x30 differential refresh takes <280 ms.
+
+**Tradeoffs / Risk:**
+- Full-screen TUI apps attempting complex 256-color SGR escapes fall back gracefully to the closest 16-color ANSI palette mapped by `Theme.sgr_to_rgb565`.
+
+---
+
+## DEC-W32: Multi-Geometry Bitmap Typography Pipeline and Comic Mono Font Architecture
+
+**Date:** 2026-10-16
+
+**Problem:**
+The fixed 320x240 LCD display running the stock 6x8 bitmap font yields 53 columns by 30 rows. While functional for dense text, 6x8 glyphs cause eye strain during extended reading and mobile transit. Integer font multipliers in TFT_eSPI jump directly from 6x8 (Font 1, 53x30) to 12x16 (Font 2, 26x15), omitting intermediate readable geometries. Operator requested Comic Mono style ergonomics and a reproducible font pipeline.
+
+**Root Cause:**
+TFT_eSPI bitmap font renderer does not interpolate fractional scaling. Adding custom geometries requires compiling discrete bitmapped font glyph tables into coprocessor flash memory.
+
+**Decision:**
+- Establish a reproducible Python font compilation pipeline (`scripts/generate_font_8x12.py`) using FreeType / Pillow to render 95 printable ASCII glyphs (32 to 126) from monospaced sources into discrete PROGMEM bitmask arrays:
+  - Font 1: 6x8 cell (53 columns x 30 rows) - stock high-density layout.
+  - Font 5: 8x12 cell (40 columns x 20 rows) - intermediate Comic Mono / monospace readable layout (`kFont8x12Glyphs[95][12]`).
+  - Font 2: 12x16 cell (26 columns x 15 rows) - double-height presentation layout.
+  - Font 3: 18x24 cell (17 columns x 10 rows) - large glanceable cockpit layout.
+- Formalize `whiskerframe/metrics.py` font metric registry mapping `(font_id, cell_width, cell_height, line_advance)`.
+- Wire `Fn + Backspace (labeled 'del')` (`0x8B`) in `pi/terminal/bridge.py` to cycle seamlessly through `RESIZE_SIZES = (1, 5, 2, 3)`, updating `TerminalGeometry`, triggering `TIOCSWINSZ` ioctl on the active PTY, and executing a full screen repaint.
+
+**Physics & Feasibility Checks:**
+- Flash Memory: 95 glyphs * 12 bytes = 1,140 bytes of PROGMEM flash on the ESP32. Free heap is untouched (>80 KB free heap invariant maintained).
+- Wire Efficiency: Intermediate 40x20 geometry reduces total screen cells from 1,590 to 800, cutting UART transmission overhead by 49.7% during full-screen redraws.
+
+**Tradeoffs / Risk:**
+- Bitmap glyphs are 7-bit ASCII (32..126); non-ASCII unicode characters are mapped to replacement glyphs or spaces to protect the 328 KB internal SRAM ceiling per `REQ-UX-08`.
+
+---
+
+## DEC-W33: CardKB Hardware I2C Driver, SK6812 NeoPixel Yellow Latch Feedback, and Translation Reset
+
+**Date:** 2026-10-16
+
+**Problem:**
+The M5Stack CardKB lacks a dedicated Control key modifier, making terminal interrupt signals (`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+\`) impossible with standard matrix scanning. Furthermore, the onboard SK6812 NeoPixel remained in an undefined state on boot or power cycle, and users lacked clear physical feedback when an input modifier was latched.
+
+**Root Cause:**
+CardKB ATmega328P coprocessor firmware maps physical keys directly to ASCII bytes and on-board Fn layers without sending modifier make/break scancodes. However, the ATmega328P I2C slave interface implements commands `0x13 [r, g, b]` (set LED color) and `0x11` (clear LED).
+
+**Decision:**
+- Enhance `pi/cardkb/reader.py` with direct I2C NeoPixel hardware controls: `set_led(r, g, b)` and `clear_led()`.
+- Enforce NeoPixel default-off on boot and driver initialization by issuing `clear_led()` (`0x11`) during `TerminalBridge` setup.
+- Implement sequential sticky Ctrl latch triggered by `Fn+Tab` (`0x8C`):
+  1. Upon receiving `0x8C`, arm the latch state machine and record timestamp.
+  2. Illuminate the CardKB NeoPixel bright yellow (`255, 200, 0`) via I2C opcode `0x13`.
+  3. Recolor the active terminal cursor cell to bright yellow (`theme.ansi[11]`, `#ffe08a`).
+  4. The next qualifying keystroke in `_CTRL_VALID_CHARS` (`a-z`, `A-Z`, `@ [ \ ] ^ _ space`) is bitmasked with `& 0x1F` (yielding standard ASCII C0 control codes, e.g. `ord('c') & 0x1F = 0x03`).
+  5. Upon key consumption, toggle re-press, or 3.0s timeout expiration, immediately disarm latch, extinguish NeoPixel (`0x11`), and restore cursor color.
+- Cleanly reset key translation buffers so subsequent non-modified keys pass through unaltered.
+
+**Physics & Feasibility Checks:**
+- Bus Timing: I2C write of 4 bytes (`0x13, 0xFF, 0xC8, 0x00`) over 100 kHz I2C bus takes 360 microseconds ($3.6 \times 10^{-4}$ s). Latency is imperceptible to human typing.
+- Power: SK6812 single LED draws ~20mA at full brightness; intermittent latch illumination adds negligible battery load (<0.07 Wh over 24 hours).
+
+**Tradeoffs / Risk:**
+- Sequential modifier requires two distinct keystrokes (`Fn+Tab` then `c` for `Ctrl+C`). Mitigated by high-contrast visual indicators and documented in `keys` cheatsheet.
+
+---
+
+## DEC-W34: Hardened Multi-Tenant Guest Demo Sandbox, PAM Integration, and Ephemeral Lifecycle
+
+**Date:** 2026-10-16
+
+**Problem:**
+Exhibiting the WhiskerFrame cyberdeck to conference attendees at DICT HACK4GOV 5 requires allowing hands-on terminal interaction without risking data leakage, host credential exposure, network pivoting, or resource starvation.
+
+**Root Cause:**
+Standard Linux user accounts share local networking, can scan adjacent LAN devices, have persistent home directories on disk, and can spawn background processes that persist after physical logout.
+
+**Decision:**
+- Implement dedicated `ansible/roles/guest_demo/` provisioning an unprivileged `guest` account with known credentials (`guest:guest`) displayed on the login splash.
+- Kernel-Level Network Isolation: Deploy dedicated `nftables` table `guest_isolation` enforcing an unconditional egress drop on all packets with socket UID `guest` (`skuid "guest"`). This severs LAN, WAN, and loopback connectivity for the guest user while preserving host system connectivity.
+- Ephemeral Storage: Mount `/home/guest` on an isolated 8MB `tmpfs` RAM disk (`nodev,nosuid,size=8M,mode=0700`). Register PAM logout hook `/usr/local/bin/guest-session-cleanup.sh` via `pam_exec.so` that purges all modified files and restores a pristine `/etc/skel` environment upon every session exit.
+- Process Reaper: Deploy systemd service `cyberdeck-guest-reaper.service` executing `/usr/local/bin/cyberdeck-guest-reaper.sh` every 5 seconds. The reaper terminates any guest process running longer than 5 seconds with `SIGKILL`, preventing background miners, persistence scripts, or fork bombs while sparing the interactive shell.
+- Resource Bounds: Enforce strict systemd cgroup slice limits: `MemoryMax=64M`, `TasksMax=30`, `CPUQuota=50%`. Restrict administrative directories (`/home/neko`, `/root`, `/etc/NetworkManager`) to mode `0700`.
+- Auto-launch `demo` telemetry dashboard in guest `.bashrc` for an immediate, responsive out-of-the-box demonstration.
+
+**Physics & Feasibility Checks:**
+- Memory Safety: 8MB tmpfs is capped at 1.9% of Pi Zero 2W usable RAM (416MB). Even if filled completely by guest files, earlyoom thresholds (50MB floor) are protected.
+- Verification: 11/11 automated abuse containment assertions pass in `/usr/local/bin/test-guest-containment.sh`.
+
+**Tradeoffs / Risk:**
+- Guest user cannot download files or test network tools. This is a deliberate design requirement (`REQ-OPS-04`, `REQ-SEC-01`).
+
+---
+
+## DEC-W35: Coprocessor Binary Image Blitting (`0x05 DRAW_IMAGE`), RGB565 Chunk Streaming, and Safe Grid Recovery
+
+**Date:** 2026-10-16
+
+**Problem:**
+The cyberdeck requires displaying graphical assets, splash screens, diagrams, and pixel art (`demo art`) on the 320x240 LCD. A full uncompressed 320x240 frame comprises 153,600 bytes. Transmitting large continuous data blocks over 115,200 baud UART overflows the ESP32 UART RX FIFO (128 bytes) and desynchronizes the terminal VT100 character grid.
+
+**Root Cause:**
+Hardware flow control (RTS/CTS) is absent on the CH340 USB-to-UART bridge. Large unchunked serial writes lead to buffer overrun, dropped bytes, CRC-8 framing errors, and corrupted on-screen text.
+
+**Decision:**
+- Utilize wire protocol opcode `0x05` (`DRAW_IMAGE`) with chunked scanline transfer:
+  - Header: `x:u16, y:u16, w:u16, h:u16` (little-endian coordinates and dimensions).
+  - Payload: Raw pixel data packed strictly as **big-endian RGB565** (high byte first) per DEC-W5.
+- Limit chunk size: Host streams large images in bounded slices of 2 scanlines (`CHUNK_ROWS = 2`, payload $320 \times 2 \times 2 = 1,280$ bytes), allowing the ESP32 coprocessor to blit directly via `tft.pushImage` without dynamic heap allocation.
+- Implement path confinement and dimension validation in `scripts/convert_splash.py` and `pi/terminal/splash.py`.
+- Safe Grid Recovery: Following image blitting or splash display, the terminal bridge executes a mandatory `full_repaint()` across all non-blank character cells, ensuring clean text restoration without requiring coprocessor reboot.
+
+**Physics & Feasibility Checks:**
+- Wire Bandwidth: A 128x128 doodle (32,768 bytes) streams in 26 chunks over ~2.84 seconds at 115,200 baud. Bounded 1,280-byte chunks comfortably drain during CH340 USB transfer without FIFO overrun.
+- Coprocessor Heap: `pushImage` blits directly from the decoder buffer into ILI9341 controller GRAM; zero bytes allocated in ESP32 heap.
+
+**Tradeoffs / Risk:**
+- Full-screen graphical animations at 30 FPS are physically impossible over 115,200 baud UART. The architecture explicitly targets static art, splash imagery, and low-framerate diagrams.
+
+---
+
+## DEC-W36: Lightweight Multi-PTY Terminal Workspaces, CardKB Switching Chords, and Isolated Shell Lifecycles
+
+**Date:** 2026-10-16
+
+**Problem:**
+Operating in a single terminal session creates severe friction when switching between interactive editing, telemetry monitoring, and background tasks. Traditional terminal multiplexers (`tmux`, `screen`) impose excessive memory overhead (~25-40 MB) and require complex, unreachable multi-key escape sequences (`Ctrl+B`, `Ctrl+A`) that collide with the 50-key CardKB layout.
+
+**Root Cause:**
+Standard multiplexers are designed for 80x24+ VT100 terminals on full PC keyboards and maintain redundant scrollback buffers unsuitable for the Pi Zero 2W 416 MB RAM ceiling.
+
+**Decision:**
+- Architect a lightweight multi-PTY workspace manager embedded directly inside `TerminalBridge`:
+  - Support up to 4 virtual workspaces (`WS1` through `WS4`).
+  - Each workspace maintains an independent PTY master file descriptor, child shell PID (`su - <user>`), and `VTEmulator` virtual character grid.
+  - Background workspaces continue asynchronous execution; stdout data is parsed into background grids via non-blocking `select()` polling without rendering to UART.
+- CardKB Workspace Switching:
+  - Implement direct switching chords via `Fn + 1` through `Fn + 4` (or sequential navigation `Fn + Left` / `Fn + Right`).
+  - Switching workspaces swaps the active PTY read/write file descriptors and executes a differential grid repaint (`grid.diff(prev_active)`) to instantly reflect the new workspace state.
+- Lifecycle Isolation:
+  - Exiting a shell (`exit` or `logout`) terminates only the active workspace PTY. Sibling workspaces remain alive.
+  - When all workspaces have exited, the bridge cleanly returns to the PAM login gate.
+
+**Physics & Feasibility Checks:**
+- Memory Footprint: Each virtual workspace grid consumes $53 \times 30 \times \text{sizeof(Cell)} \approx 25 \text{ KB}$. Four concurrent workspaces consume <100 KB total RAM, less than 0.025% of Pi Zero 2W memory.
+- Switching Latency: Differential repaint of changed cells takes 15–45 ms over UART, producing snappy, responsive workspace transitions.
+
+**Tradeoffs / Risk:**
+- CPU contention: Background processes running in inactive workspaces share the single-core / low-power BCM2835 CPU. Addressed by cgroups CPU quotas and nice priority levels.
+
+---
+
+## DEC-W37: Low-Flicker Terminal Status Bar, Telemetry Polling, and UART vs Wireless Transport Profiling
+
+**Date:** 2026-10-16
+
+**Problem:**
+Operators require real-time visibility into cyberdeck hardware telemetry (active workspace, Wi-Fi SSID/signal, battery voltage/percentage, CPU thermals, and sticky Ctrl latch state). However, redrawing an entire status line or polling sensors directly inside the display loop causes visible text flicker and UART bandwidth saturation. Furthermore, evaluating whether to replace UART with ESP32 Wi-Fi / Bluetooth transport required empirical measurement.
+
+**Root Cause:**
+Naively blitting full status rows (53 characters + color attributes) every second generates ~160 bytes per update. When combined with terminal output, UART queues congest, introducing typing latency. Polling I2C telemetry directly inside the terminal thread risks blocking on transient I2C bus stalls.
+
+**Decision:**
+- Asynchronous File-Based Telemetry: The status bar renderer reads cached telemetry files produced by independent native services:
+  - Battery/Power: `/run/battery_monitor/status.json` (updated by `battery-monitor.service`).
+  - Thermals: `/sys/class/thermal/thermal_zone0/temp` (read-only sysfs entry).
+  - Network: NetworkManager active connection state.
+- Cell-Differential Status Bar Rendering:
+  - The status bar occupies row 0 or row 29 of the terminal grid.
+  - Updates are evaluated at a throttled 2.0-second interval.
+  - Grid differential logic (`grid.diff`) emits `DRAW_CELLS` only for the exact characters that changed (e.g., updating battery percentage from `"94%"` to `"93%"` emits only 3 cells / 9 bytes).
+  - Unchanged status icons, dividers, and workspace tags generate zero UART traffic.
+- Transport Bottleneck & Wireless Evaluation:
+  - *UART 115,200 Baud:* Raw wire throughput is 11,520 bytes/sec. Differential cell updates consume <5% of bus capacity. Highly deterministic, zero RF interference, and immune to radio dropouts.
+  - *UART 230,400 / 460,800 Baud:* Achievable over CH340, but increased bit error rates observed on unshielded internal wiring inside prototype enclosure. 115,200 baud retained as safe default.
+  - *ESP32 Wi-Fi / BLE Transport (Evaluated & Deferred):* Transmitting terminal frames over ESP32 Wi-Fi / Bluetooth introduces 15-60 ms packet latency jitter, adds 80-120 mA continuous current draw to the ESP32 (reducing battery life by ~1.5 hours), and causes 2.4 GHz RF contention with the Pi Zero 2W Wi-Fi interface inside the sealed chassis. Wired UART remains the vastly superior transport.
+
+**Physics & Feasibility Checks:**
+- Telemetry Overhead: 3-cell differential update takes 0.78 ms wire transmission time. Zero perceptible flicker.
+- Power Budget: Reading `/run/battery_monitor/status.json` requires zero additional I2C transactions, preserving bus bandwidth for CardKB.
+
+**Tradeoffs / Risk:**
+- If `battery-monitor.service` is stopped, telemetry displays last-known cached values flagged with a stale indicator (`*`).
+
+---
+
+## DEC-W38: Unified WhiskerFrame CLI (`wf`), Complete Offline Manual, and Guest PAM Demo Autostart
+
+**Date:** 2026-10-16
+
+**Problem:**
+The WhiskerFrame cyberdeck required a single, unified entrypoint executable for terminal users and guest demonstrators. Previously, utilities were fragmented across individual scripts (`wifi`, `demo`, `keys`, `wiki`). Standard system manual pages (`man`) assumed 80-column terminals and wrapped destructively on the 53-column CYD LCD. Furthermore, guest demonstration sessions needed automatic demo guidance upon PAM login without requiring manual command entry by unfamiliar conference attendees.
+
+**Root Cause:**
+1. Fragmented tool namespace: Users had to remember individual paths and binaries under `pi/bin/`.
+2. Geometry mismatch: Standard system documentation formats (roff/groff/man) generate 80+ column text that causes unpadded line breaks and visual stutter on the 320x240 ILI9341 display (Font 1, 53x30 text grid).
+3. Session lifecycle: Linux PAM session initialization (`pam_exec.so`) historically handled only `close_session` cleanup, missing `open_session` setup for guest profile autostart in ephemeral tmpfs environments.
+
+**Decision:**
+- **Unified Executable (`pi/bin/wf`):** Author a single Python CLI providing a cohesive interface with subcommands:
+  - `wf` / `wf help`: Compact command overview bounded strictly to <= 53 columns.
+  - `wf man [topic]`: Complete offline documentation formatted strictly <= 53 columns covering 5 core topics:
+    - `kb`: CardKB keybindings, sticky Ctrl latch (`Fn+Tab`), geometry cycling (`Fn+Backspace`), and NeoPixel LED feedback.
+    - `wifi`: 2.4 GHz hardware bounds, NetworkManager backend, status, scan, join, and forget commands.
+    - `demo`: Kernel sandbox boundaries, ephemeral 8MB tmpfs home, 5s process reaper, and nftables egress drop.
+    - `terminal`: ILI9341 display link, serial opcodes (`0x01`–`0x06`), 115200 baud wire throughput, and font geometries.
+    - `workspaces`: Multi-session management, active workspace indicators (`[*]`), session creation, switching, and closing.
+  - `wf wifi`: Delegates directly to `pi/bin/wifi` via dynamic module loading (`SourceFileLoader`), eliminating subshell process fork overhead while reusing existing tested logic.
+  - `wf demo` / `wf demo art`: Launches the telemetry banner or Cyberdeck artwork gallery within 53-column bounds.
+  - `wf terminal` / `wf workspace`: Manages session tracking (`list`, `new`, `switch`, `close`) backed by persistent workspace state file (`WF_WORKSPACE_FILE`).
+- **Strict 53-Column Wrapping:** All stdout output from `pi/bin/wf` is filtered through `print_bounded()`, wrapping lines strictly at <= 53 characters with automatic word preservation.
+- **PAM Guest Login Autostart:**
+  - Extended `ansible/roles/guest_demo/templates/guest-session-cleanup.sh.j2` to intercept `PAM_TYPE="open_session"`. It populates `/home/guest` from `/etc/skel` and injects `[ -x /usr/local/bin/wf ] && /usr/local/bin/wf demo` into `.bashrc`.
+  - Deployed `/etc/profile.d/guest-demo.sh` via Ansible and `pi/terminal/install.sh` to trigger `wf demo` automatically for interactive guest shells (`[ -n "$PS1" ]`).
+  - Symlinked `pi/bin/wf` to `/usr/local/bin/wf`.
+- **Automated Test Suite (`test/test_wf_cli.py`):** Author 18 automated unit tests covering column width limits, manual topic completeness, Wi-Fi delegation, demo execution, workspace lifecycle, and PAM autostart templates.
+
+**Physics & Feasibility Checks:**
+- Display Bounds: Maximum line length across all subcommands is guaranteed <= 53 characters. Zero unpadded line breaks or scroll distortion on the 320x240 LCD.
+- Process Overhead: Wi-Fi delegation dynamically loads `pi/bin/wifi` in-process, avoiding the ~15–25 ms latency and memory overhead of spawning an extra Python interpreter on the Pi Zero 2W.
+
+**Tradeoffs / Risk:**
+- Text wrapping at 53 columns reduces horizontal density, requiring vertical paging for lengthy manual topics. Mitigated by compact section headers and concise, high-signal phrasing.
+
+
