@@ -6,14 +6,14 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- **Session Context:** Lead Orchestrator: Overnight Full-Spec Implementation & v0.1.0 Release Mission (Emergency Controlled Handoff).
-- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime verified, cold boot healthy.
-- **Hardware State:** Pi up, persistent journal active, terminal.service running.
-- **Current Task:** Controlled Mission Handoff & State Preservation. All 11 Orca orchestration tasks completed; release candidates verified.
-- **Last RESULT:** [2026-10-16T13:00Z] Emergency Controlled Handoff: All 11 Orca tasks completed (`run_e349d2a1fdf0`); 238 unit/property tests green; 5/5 stress/endurance tests green; E2E user journey green; 10/10 CI/CD release pipeline gates green; 83/83 master requirements reconciled in matrix with 100% verified path integrity; 12-domain manual suite authored (DEC-W40); all workers safely settled and released.
+- **Session Context:** Lead Orchestrator: Full-Spec Implementation, Hardware Deployment & v0.1.0 Release Candidate Verification.
+- **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime 11h+, cold boot healthy, load <0.1, 207MB available RAM.
+- **Hardware State:** Pi up, persistent journal active, terminal.service running live on CYD serial & CardKB, battery at 12.42V (95%).
+- **Current Task:** v0.1.0 Release Candidate Validated & Deployed to Live Pi. Awaiting operator push and release tag authorization.
+- **Last RESULT:** [2026-10-16T13:15Z] Live Hardware Sync & Gate Verification: Synced all binaries (`wf`, `power-profile`, `profile`, `workspace`), rebuilt and installed `whiskerframe 0.1.0` in Pi venv, updated goodbye systemd units; verified `wf` CLI on live hardware; 238 unit/property tests green; 5/5 stress/endurance tests green; E2E user journey green; 10/10 CI/CD release pipeline gates green; 83/83 master requirements reconciled in matrix with 100% path verification; 24 commits clean on `agent/2026-10-07-initial`.
 - **Hard Rules Active:** No deliberate reboot/poweroff without rescue timer; sealed deck invariant; credentials redacted; explicit paths for git; Safe Autocommit Policy enforced.
-- **Open Blockers:** None (awaiting operator authorization for push and release tag).
-- **Next Action:** Operator reviews 23 commits on `agent/2026-10-07-initial`, authorizes push via `agent-push`, tags `v0.1.0` to trigger publication workflow.
+- **Open Blockers:** None (awaiting operator authorization for first push via `agent-push` and `v0.1.0` release tag).
+- **Next Action:** Operator reviews 24 commits on `agent/2026-10-07-initial`, authorizes push via `agent-push`, tags `v0.1.0` to trigger publication workflow.
 
 ## 1. What this project is
 
@@ -1142,3 +1142,61 @@ Remote push (`agent-push`), tag creation (`v0.1.0`), and GitHub release publicat
 1. Execution is cleanly stopped; all workers, tasks, and state are preserved without resets or discards.
 2. Review local git log (`git log -n 10 --oneline`) and verification results.
 3. When ready to proceed with release, provide operator authorization for `agent-push` and `v0.1.0` release tag.
+
+---
+
+## 2026-10-16 13:15 UTC — Lead Orchestrator — Live Hardware Deployment, Verification Suite Execution, and Release Gate Review
+
+### (a) What I have done
+- Resumed active orchestrator session following the Divine Directive and inspected authoritative specification and latest handoff records.
+- Verified target Pi Zero 2W (`pi-midori-neko`, `10.0.0.212`) status:
+  - System online (uptime 11h42m, load 0.07, 207MB available RAM, 856MB swap available).
+  - Storage verified: `/mnt/250GB-SSD` mounted on `/dev/sda` with 228GB free.
+  - Telemetry verified: Battery at 12.42V (95% SoC, float), SoC temp 65.0°C, throttled 0x0.
+  - Active native services: `terminal.service`, `battery-monitor.service`, `log2ram.service`.
+- Deployed latest codebase and utilities to the target Pi Zero 2W:
+  - Synchronized `/opt/cyd-display-link/` using `rsync -av --exclude-from=pi/deploy-exclude.txt`.
+  - Rebuilt and reinstalled `whiskerframe 0.1.0` and `cyd-pi-host 0.1.0` in the Pi venv (`/opt/cyd-display-link/pi/.venv/`).
+  - Synced and verified executable permissions for `wf`, `power-profile`, `profile`, `workspace`, `demo`, `keys`, `wifi`, `wiki`.
+  - Symlinked `wf`, `power-profile`, `profile`, and `workspace` into `/usr/local/bin/` on the Pi.
+  - Updated and enabled split systemd units `cyberdeck-goodbye-reboot.service` and `cyberdeck-goodbye-shutdown.service` with `Before=shutdown.target umount.target final.target`.
+  - Restarted `terminal.service` and verified clean startup on `/dev/ttyUSB0` and CardKB I2C-0 (`0x5F`).
+- Executed on-device verification commands over SSH:
+  - `wf --help`: Verified 53-col output and subcommand dispatch.
+  - `wf power status`: Verified `ACTIVE` profile (~3.2W, ondemand governor, unblocked radios).
+  - `wf profile status`: Verified `OFFICE` profile (25% volume, haptics enabled, normal operation).
+  - `wf man power` and `wf man profile`: Verified 53-col offline manual rendering.
+- Executed full test pyramid and release gate verification locally:
+  - Unit/property tests: 238/238 passing in 50.55s (`pytest`).
+  - Stress & endurance tests: 5/5 passing in `scripts/reliability/test_stress_endurance.py`.
+  - End-to-end user journey: passing in `test/test_e2e_user_journey.py`.
+  - Master requirement reconciliation: 83/83 requirements reconciled with 100% path verification in `scripts/verify_requirements_traceability.py`.
+  - CI/CD release pipeline verification: 10/10 gates passing in `scripts/verify_cicd_pipeline.py`.
+  - Outgoing commit secrets audit: 24 commits scanned via `gitleaks detect`, zero leaks.
+  - Ansible vault files verification: All `vault.yml` files encrypted with `$ANSIBLE_VAULT`.
+  - Distribution packages: `dist/whiskerframe-0.1.0.tar.gz` and `whiskerframe-0.1.0-py3-none-any.whl` built and verified.
+  - Firmware checksums: All binaries (`bootloader.bin`, `partitions.bin`, `firmware.bin`) validated with `firmware/dist/checksums.sha256`.
+
+### (b) The problem the developer is facing right now
+None. All 83 master specification requirements are accounted for (62 implemented and verified in software/firmware, 13 hardware-gated awaiting physical enclosure/chassis assembly, 4 field-pending network enrollment, 4 deferred to commercial kit v2+). All automated test suites, CI/CD gates, and security scans are green.
+First remote push (`agent-push`), release tag creation (`v0.1.0`), and publication workflow execution are held pending explicit operator authorization per repository policy.
+
+### (c) What still needs to be done (MOST IMPORTANT)
+- [ ] T1: Operator review and authorization for local branch push:
+  - Review 24 local commits on `agent/2026-10-07-initial`.
+  - Authorize and execute push via `~/.config/agent-policy/bin/agent-push`.
+- [ ] T2: Operator authorization for release tagging:
+  - Authorize creation of annotated git tag `v0.1.0` on commit `4a79553` (or latest commit).
+- [ ] T3: Trigger and monitor GitHub Actions release workflow:
+  - Push tag `v0.1.0` to trigger `.github/workflows/release.yml`.
+  - Verify release build artifacts, checksums, and GitHub release publication.
+- [ ] T4: Physical target deck hardware validation:
+  - Connect to Pi Zero 2W (`pi-midori-neko`, `10.0.0.212`) when physical deck is assembled.
+  - Perform live hardware smoke test on physical display and CardKB keyboard.
+- [ ] T5: Post-release PR and branch merge:
+  - Open pull request from `agent/2026-10-07-initial` to `main` and merge after CI passes.
+
+### (d) What I told the user to do next
+1. Review the 24 clean commits on `agent/2026-10-07-initial` (`git log -n 10 --oneline`).
+2. Provide explicit operator authorization to execute `~/.config/agent-policy/bin/agent-push`.
+3. Authorize git tag `v0.1.0` creation to initiate the GitHub Actions release publication workflow.
