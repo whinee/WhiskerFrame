@@ -79,7 +79,8 @@ class TestCardKBI2CFirmwareRegistersAndDefaultOff(unittest.TestCase):
 
     @patch("cardkb.reader.os.write")
     def test_led_operations_fail_silent_on_bus_error(
-        self, mock_write: MagicMock,
+        self,
+        mock_write: MagicMock,
     ) -> None:
         """clear_led and set_led fail silently on OSError (returning False)."""
         mock_write.side_effect = OSError(121, "Remote I/O error")
@@ -128,7 +129,8 @@ class TestCardKBI2CFirmwareRegistersAndDefaultOff(unittest.TestCase):
 
     @patch("cardkb.reader.os.write")
     def test_ensure_default_led_off_convenience_method(
-        self, mock_write: MagicMock,
+        self,
+        mock_write: MagicMock,
     ) -> None:
         """ensure_default_led_off() invokes clear_led() to guarantee state."""
         kb = CardKB()
@@ -280,7 +282,8 @@ class TestCtrlLatchFeedbackAndIndicatorRecolor(unittest.TestCase):
                 self.session._process_single_key(CTRL_LATCH_CHORD)
                 self.assertTrue(self.session._is_ctrl_armed())
                 self.assertEqual(
-                    self._get_last_painted_cursor_bg(), self.theme.ansi[11],
+                    self._get_last_painted_cursor_bg(),
+                    self.theme.ansi[11],
                 )
                 self.mock_cardkb.set_led.assert_called_once_with(255, 200, 0)
 
