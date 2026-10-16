@@ -11,6 +11,7 @@ dev/mcaptcha/
 dev/temp/
 personal/
 **/tmp/
+temp/
 docs/.obsidian/plugins
 docs/.trash/
 docs/.DS_Store
@@ -23,6 +24,10 @@ docker-compose.yml
 tr.yml
 yarn.lock
 yarn-error.log
+.claude/deploy_queue.json
+.claude/deploy.lock
+.claude/last_firmware_sha.txt
+.claude/last_deploy_state.json
 **/*.AppImage
 **/*.bak
 **/*.bak.*
