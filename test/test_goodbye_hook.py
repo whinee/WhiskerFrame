@@ -35,7 +35,6 @@ _loader.exec_module(goodbye_hook)
 from whiskerframe.models import DrawRect, DrawText  # noqa: E402
 from whiskerframe.protocol import decode  # noqa: E402
 from whiskerframe.terminal import (  # noqa: E402
-    DISPLAY_HEIGHT,
     DISPLAY_WIDTH,
     DisplaySleep,
     DrawImage,
@@ -124,7 +123,9 @@ class TestGoodbyeHook(unittest.TestCase):
         self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
 
         # Check subtitle text frame
-        text_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)]
+        text_frames = [
+            cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)
+        ]
         self.assertEqual(len(text_frames), 1)
         self.assertEqual(text_frames[0].text, "bai baiii!")
         self.assertEqual(text_frames[0].x, 160)
@@ -162,7 +163,9 @@ class TestGoodbyeHook(unittest.TestCase):
         self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
 
         # Check subtitle text frame
-        text_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)]
+        text_frames = [
+            cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)
+        ]
         self.assertEqual(len(text_frames), 1)
         self.assertEqual(text_frames[0].text, "brb :3")
         self.assertEqual(text_frames[0].x, 160)
@@ -170,10 +173,15 @@ class TestGoodbyeHook(unittest.TestCase):
 
         # Reboot does NOT send black wipe or sleep (keeps 'brb :3' on screen until reboot completes)
         black_frames = [
-            cmd for f in written_frames if isinstance((cmd := decode(f)), DrawRect) and cmd.color == goodbye_hook._BLACK
+            cmd
+            for f in written_frames
+            if isinstance((cmd := decode(f)), DrawRect)
+            and cmd.color == goodbye_hook._BLACK
         ]
         self.assertEqual(len(black_frames), 0)
-        sleep_frames = [cmd for f in written_frames if isinstance((cmd := decode(f)), DisplaySleep)]
+        sleep_frames = [
+            cmd for f in written_frames if isinstance((cmd := decode(f)), DisplaySleep)
+        ]
         self.assertEqual(len(sleep_frames), 0)
 
     def test_fail_silent_on_missing_serial_port(self) -> None:

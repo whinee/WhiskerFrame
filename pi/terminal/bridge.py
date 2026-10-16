@@ -102,8 +102,8 @@ Fn layer maps Del to 139 (0x8B); it is on the Fn layer so it never collides with
 a shell keystroke, and unlike Shift+Del (0x7F) it does not alias Backspace.
 """
 
-RESIZE_SIZES: tuple[int, ...] = (1, 2, 3)
-"""Font sizes the resize chord cycles through (grid 53x30 / 26x15 / 17x10)."""
+RESIZE_SIZES: tuple[int, ...] = (1, 5, 2, 3)
+"""Font sizes the resize chord cycles through (grid 53x30 / 40x20 / 26x15 / 17x10)."""
 
 _SERIAL_BACKOFF_START_S: float = 0.5
 _SERIAL_BACKOFF_MAX_S: float = 5.0

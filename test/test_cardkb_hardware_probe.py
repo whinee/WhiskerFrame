@@ -113,6 +113,7 @@ class TestCardKBHardwareProbe(unittest.TestCase):
         desc_c = describe_key(ord("c"))
         self.assertIn("Ctrl -> 0x03", desc_c)
 
+    @patch("cardkb.reader.os.close")
     @patch("cardkb.reader.os.read")
     @patch("cardkb.reader.os.open")
     @patch("cardkb.reader.fcntl.ioctl")
@@ -121,6 +122,7 @@ class TestCardKBHardwareProbe(unittest.TestCase):
         mock_ioctl: MagicMock,
         mock_open: MagicMock,
         mock_read: MagicMock,
+        mock_close: MagicMock,
     ) -> None:
         """Verify probe reads keys through CardKB without error."""
         mock_open.return_value = 10
