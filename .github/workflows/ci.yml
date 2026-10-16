@@ -25,7 +25,7 @@ jobs:
       - name: Install Ruff & Mypy
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pydantic
+          pip install -e . ruff mypy pydantic
 
       - name: Run Ruff Linter
         run: ruff check whiskerframe/
@@ -51,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest hypothesis pydantic
+          pip install -e . pillow hypothesis pydantic
 
       - name: Execute Pytest Suite
         run: pytest -v
@@ -84,7 +84,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install pillow
+        run: pip install -e . pillow
 
       - name: Verify Font Compilation
         run: python scripts/verify_comic_mono_fonts.py
@@ -105,7 +105,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install acceptance dependencies
-        run: pip install pytest hypothesis pydantic pillow
+        run: pip install -e . pytest hypothesis pydantic pillow
 
       - name: Run Master Acceptance Test Runner
         run: python scripts/run_all_acceptance_tests.py
