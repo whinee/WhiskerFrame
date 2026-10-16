@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""
+Whiskerframe Cyberdeck Workspace CLI.
+
+Manage and switch multi-PTY workspaces on the CYD terminal (i3-style).
+Formatted strictly to <= 53 columns (Font 1 geometry on CYD display).
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections.abc import Callable
+from pathlib import Path
+
+# Add pi directory to sys.path
+_PI_DIR = Path(__file__).resolve().parent.parent
+if str(_PI_DIR) not in sys.path:
+    sys.path.insert(0, str(_PI_DIR))
+
+from terminal.workspaces import WorkspaceClient  # noqa: E402
+
+_MAX_COLS: int = 53
+
+
+def _truncate(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    return "..." + text[-(max_len - 3) :]
+
+
+def cmd_list(client: WorkspaceClient, _args: argparse.Namespace) -> int:
+    """List all active workspaces."""
+    try:
+        resp = client.list()
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if not resp.get("ok"):
+        print(f"Error: {resp.get('error', 'unknown')}", file=sys.stderr)
+        return 1
+
+    workspaces = resp.get("workspaces", [])
+    active_id = resp.get("active")
+    max_count = resp.get("max", 4)
+
+    print(f"=== WORKSPACES ({len(workspaces)}/{max_count}) ===")
+    print("ID  NAME    PID    ACT  CWD")
+    for ws in workspaces:
+        ws_id = ws["id"]
+        name = _truncate(ws["name"], 7)
+        pid = ws["pid"]
+        active = "*" if ws_id == active_id else " "
+        cwd = _truncate(ws["cwd"], 24)
+        print(f"{ws_id:<2}  {name:<7} {pid:<6}  {active}   {cwd}")
+    return 0
+
+
+def cmd_switch(client: WorkspaceClient, args: argparse.Namespace) -> int:
+    """Switch active workspace."""
+    try:
+        resp = client.switch(args.id)
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if resp.get("ok"):
+        print(f"Switched to workspace {resp.get('active', args.id)}")
+        return 0
+    print(f"Failed: {resp.get('error', 'could not switch')}", file=sys.stderr)
+    return 1
+
+
+def cmd_next(client: WorkspaceClient, _args: argparse.Namespace) -> int:
+    """Switch to next workspace."""
+    try:
+        resp = client.next()
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if resp.get("ok"):
+        print(f"Switched to workspace {resp.get('active')}")
+        return 0
+    print("Failed to cycle workspace", file=sys.stderr)
+    return 1
+
+
+def cmd_prev(client: WorkspaceClient, _args: argparse.Namespace) -> int:
+    """Switch to previous workspace."""
+    try:
+        resp = client.prev()
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if resp.get("ok"):
+        print(f"Switched to workspace {resp.get('active')}")
+        return 0
+    print("Failed to cycle workspace", file=sys.stderr)
+    return 1
+
+
+def cmd_new(client: WorkspaceClient, args: argparse.Namespace) -> int:
+    """Create a new workspace."""
+    try:
+        resp = client.new(args.name)
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if resp.get("ok"):
+        print(f"Created workspace {resp.get('id')}")
+        return 0
+    print(f"Failed: {resp.get('error')}", file=sys.stderr)
+    return 1
+
+
+def cmd_close(client: WorkspaceClient, args: argparse.Namespace) -> int:
+    """Close a workspace."""
+    try:
+        resp = client.close(args.id)
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if resp.get("ok"):
+        target = args.id if args.id is not None else "active"
+        print(f"Closed workspace {target}")
+        return 0
+    print("Failed to close workspace", file=sys.stderr)
+    return 1
+
+
+def cmd_status(client: WorkspaceClient, _args: argparse.Namespace) -> int:
+    """Display workspace manager status."""
+    try:
+        resp = client.status()
+    except (ConnectionError, OSError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if not resp.get("ok"):
+        print(f"Error: {resp.get('error')}", file=sys.stderr)
+        return 1
+
+    print("=== WORKSPACE STATUS ===")
+    print(f"Active Workspace: {resp.get('active')}")
+    print(f"Total Workspaces: {resp.get('count')} / {resp.get('max')}")
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Whiskerframe Cyberdeck Workspace Manager (<=53 cols)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("list", aliases=["ls"], help="List all active workspaces")
+
+    p_switch = sub.add_parser("switch", aliases=["goto"], help="Switch to workspace ID")
+    p_switch.add_argument("id", type=int, help="Target workspace ID (1-10)")
+
+    sub.add_parser("next", help="Switch to next workspace")
+    sub.add_parser("prev", help="Switch to previous workspace")
+
+    p_new = sub.add_parser("new", help="Create new workspace")
+    p_new.add_argument("name", nargs="?", default=None, help="Optional workspace name")
+
+    p_close = sub.add_parser("close", aliases=["kill"], help="Close workspace")
+    p_close.add_argument(
+        "id",
+        nargs="?",
+        type=int,
+        default=None,
+        help="Workspace ID (defaults to active)",
+    )
+
+    sub.add_parser("status", help="Show workspace manager status")
+    return parser
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    client = WorkspaceClient()
+
+    handlers: dict[str | None, Callable[[WorkspaceClient, argparse.Namespace], int]] = {
+        None: cmd_list,
+        "list": cmd_list,
+        "ls": cmd_list,
+        "switch": cmd_switch,
+        "goto": cmd_switch,
+        "next": cmd_next,
+        "prev": cmd_prev,
+        "new": cmd_new,
+        "close": cmd_close,
+        "kill": cmd_close,
+        "status": cmd_status,
+    }
+
+    handler = handlers.get(args.command)
+    if handler is not None:
+        return handler(client, args)
+
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
