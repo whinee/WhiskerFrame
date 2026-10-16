@@ -88,3 +88,45 @@ The display subsystem supports 4 distinct character grid geometries tailored for
 
 ---
 
+### 1.7 Power Management & Three-Tier Profiles Architecture
+
+Whiskerframe enforces a coordinated three-tier power profile management hierarchy (`REQ-PWR-01`, `DEC-W39`) executed via `pi/bin/power-profile` and `wf power`:
+
+| Profile | CPU Governor | Frequency | Radios (`rfkill`) | SATA SSD (`hdparm`) | Display State | Estimated Power | Target Operational Stance |
+|---|---|---|---|---|---|---|---|
+| **ACTIVE** | `ondemand` / `schedutil` | 1.0 GHz | Unblocked | Active | Awake | ~3.2 W load | Full computing, compilations, interactive editing |
+| **POWERSAVE** | `powersave` | 600 MHz | Unblocked | Standby (`-y`) | Active | ~1.8 W idle | Extended fieldwork, offline reading, light terminal work |
+| **AIRPLANE** | `powersave` | 600 MHz | Blocked all | Standby (`-y`) | Sleep (`0x06`) | ~0.55 W sleep | Mobile transit, air-gapped security, low-power stow |
+
+* **Hardware Abstractions & Mock Fallbacks:** In live environments, `power-profile` manipulates `/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`, invokes `/usr/sbin/rfkill`, and issues `/usr/sbin/hdparm -y`. In container/virtual test environments, mock fallbacks ensure full deterministic testing without requiring real hardware.
+* **Persistent State:** Power profile state is recorded to `/run/whiskerframe/power_state.json` (overridable via `WHISKERFRAME_POWER_STATE`).
+
+---
+
+### 1.8 Sensory Audio Presets & Cognitive Overload Mitigation Architecture
+
+The sensory audio architecture (`REQ-ENV-04`, `REQ-INP-08`, `DEC-W39`) provides deterministic audio volume levels and cognitive sensory overload protection via `pi/bin/profile` and `wf profile`:
+
+| Preset | Buzzer Volume | Haptics Enabled | Audible Alerts | Bell Mode | Operational Environment |
+|---|---|---|---|---|---|
+| **CLASSROOM** | `0%` | `False` | `False` | `visual` | Library, lecture, exam, quiet workspace |
+| **OFFICE** | `25%` | `True` | `True` | `both` | Standard indoor office, lab, home |
+| **COMMUTE** | `100%` | `True` | `True` | `both` | Bus, train, street transit, noisy outdoor venue |
+
+* **Single-Action Overload Mitigation:** In high-stress or sensory overload conditions, the operator triggers overload mitigation (`wf profile overload` or `profile overload on`). This immediately clamps effective buzzer volume to 0%, silences tickers and buzzers, and sets bell mode to visual-only.
+* **Non-Destructive Restoration:** Deactivating overload mode restores the exact calibrated volume and haptics associated with the currently selected base preset. State is tracked at `/run/whiskerframe/sensory_state.json`.
+
+---
+
+### 1.9 Hardware Supervisory Watchdog & Critical Alert Engine
+
+To safeguard against silent system failures and hazardous hardware conditions:
+
+* **Firmware Supervisory Watchdog (`REQ-HW-07`):** The ESP32 coprocessor firmware maintains a hardware link watchdog timer (`kHostWatchdogTimeoutMs = 60000`). If no valid framed packet is received over UART for >60 seconds after initial link establishment, the coprocessor draws an alert banner across the top display rows: `! HOST LINK LOST (>60s) - RECOVERY` in white on red. Receipt of any valid packet immediately clears the warning.
+* **Tri-Axial Alert Evaluation (`REQ-INP-07`):** `whiskerframe/alerts.py` evaluates system telemetry against critical safety thresholds:
+  * **Battery:** Voltage / capacity <= 5.0% triggers `CRITICAL` shutdown warning; <= 15.0% triggers `WARNING` recharge alert.
+  * **Thermals:** Core temperature >= 80.0°C triggers `CRITICAL` thermal trip alert; >= 75.0°C triggers `WARNING` throttling alert.
+  * **Memory:** Free usable RAM < 50.0 MB triggers `CRITICAL` earlyoom alert; < 100.0 MB triggers `WARNING` headroom alert.
+* **Sensory Filtering:** All alert events are arbitrated through the sensory profile engine. If sensory overload is active or the silent `CLASSROOM` profile is selected, audible alerts are suppressed, routing notifications strictly to visual terminal indicators.
+
+

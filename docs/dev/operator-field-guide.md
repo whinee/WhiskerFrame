@@ -576,9 +576,13 @@ WORKSPACE CHORDS:
 
 UNIFIED CLI SHORTCUTS:
   wf help       Command reference overview
-  wf man <top>  Offline manual (kb,wifi,demo,term,ws)
+  wf man <top>  Manual (kb,wifi,pwr,prof,term,demo)
   wf wifi scan  Scan 2.4GHz Wi-Fi networks
   wf wifi join  Connect to Wi-Fi network
+  wf power get  Show active power profile (3.2W/1.8W)
+  wf power set  Set: active / powersave / airplane
+  wf profile    Set audio: classroom/office/commute
+  wf profile ol Toggle sensory overload mute (calm)
   wf demo       Display telemetry banner
   wf demo art   Display artwork on CYD display
   wf workspace  List and switch terminal workspaces

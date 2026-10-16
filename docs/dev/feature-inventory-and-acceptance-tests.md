@@ -45,6 +45,12 @@ This inventory enumerates every implemented subsystem, capability, CLI tool, dae
 | **Storage Subsystem** | Memory Safety Hierarchy | Two-tier swap architecture: zram compressed RAM (priority 100, 208MB) + BTRFS SSD swapfile (priority 10, 512MB, `nodatacow`). `vm.swappiness=15`, `earlyoom` daemon. | `ansible/roles/memory_safety/` | TSK-07, DEC-W11, DEC-W12 | `VERIFIED` |
 | **Documentation & CLI**| 53-Col Offline Wiki CLI | Command-line documentation tool (`wiki`) wrapping `man`, `bash-doc`, and `python3-doc` into 53-column readable text with offline fallbacks. | `pi/bin/wiki`, `docs/dev/offline-library-plan.md`, `test/test_wiki_helper.py` | TSK-15, DEC-W29 | `VERIFIED` |
 | **Documentation & CLI**| Compact Shell Prompts | Ergonomic prompts: `n~ ` (neko), `g~ ` (guest), and `r# ` (root) deployed via `/etc/profile.d/cyd_prompt.sh`, preventing line-wrap truncation on small screens. | `/etc/profile.d/cyd_prompt.sh` | TSK-16, DEC-W30 | `VERIFIED` |
+| **Power Management** | Three-Tier Power Profiles | Coordinated system-wide power profiles: `ACTIVE` (~3.2W, 1.0 GHz), `POWERSAVE` (~1.8W, 600 MHz, SSD standby), `AIRPLANE` (~0.55W, 600 MHz, rfkill all, display sleep opcode `0x06`). | `pi/bin/power-profile`, `pi/bin/wf`, `test/test_power_profile.py` | TSK-24, DEC-W39, REQ-PWR-01 | `VERIFIED` |
+| **Sensory Core** | Environmental Audio Presets | 3 environmental audio presets: `CLASSROOM` (0% buzzer, haptics off, visual bell), `OFFICE` (25% buzzer, quiet), `COMMUTE` (100% buzzer, loud). | `pi/bin/profile`, `pi/bin/wf`, `test/test_sensory_profile.py` | TSK-25, DEC-W39, REQ-ENV-04 | `VERIFIED` |
+| **Sensory Core** | Cognitive Overload Toggle | Single-action cognitive sensory overload mitigation instantly muting all audible buzzers, tickers, and bells, restoring calibrated profile levels on release. | `pi/bin/profile`, `pi/bin/wf`, `test/test_sensory_profile.py` | TSK-25, DEC-W39, REQ-INP-08 | `VERIFIED` |
+| **Alert Engine** | Critical State Alerts | Tri-axial monitoring evaluating battery (<=5% critical, <=15% warn), thermals (>=80°C critical, >=75°C warn), and memory (<50MB critical, <100MB warn), filtered through sensory state. | `whiskerframe/alerts.py`, `test/test_alerts.py` | TSK-26, DEC-W39, REQ-INP-07 | `VERIFIED` |
+| **Display Link** | Host Supervisory Watchdog | 60-second hardware watchdog timer in ESP32 firmware displaying red top recovery banner (`! HOST LINK LOST (>60s) - RECOVERY`) if host halts. | `firmware/cyd_display_link/main.cpp` | TSK-26, DEC-W39, REQ-HW-07 | `VERIFIED` |
+| **UI & Themes** | Monochrome Sunlight Theme | High-contrast black/white palette achieving physical 21:1 contrast ratio for direct outdoor tropical sunlight readability. | `assets/themes/mono-high-contrast.json`, `test/test_mono_contrast.py` | TSK-26, DEC-W39, REQ-ENV-03 | `VERIFIED` |
 
 ---
 
@@ -319,6 +325,50 @@ Each test plan defines the preconditions, step-by-step commands, expected output
 
 ---
 
+### ATP-13: Three-Tier Power Profiles, Sensory Audio Presets, & Overload Mitigation
+
+* **Identifier:** `ATP-13-PWR-SENSORY-PROFILES`
+* **Requirements Addressed:** `REQ-PWR-01`, `REQ-ENV-04`, `REQ-INP-08`, `REQ-INP-07`, `REQ-ENV-03`
+* **Preconditions:**
+  1. `pi/bin/power-profile`, `pi/bin/profile`, and `pi/bin/wf` deployed and executable.
+  2. `whiskerframe/alerts.py` and `assets/themes/mono-high-contrast.json` present.
+* **Execution Steps:**
+  1. Test power profile switching:
+     ```bash
+     power-profile status
+     power-profile set powersave
+     power-profile get
+     power-profile set airplane
+     power-profile set active
+     ```
+     Verify CPU governor, rfkill, hdparm, and display sleep parameters update per profile spec.
+  2. Test sensory audio presets:
+     ```bash
+     profile status
+     profile set classroom
+     profile set office
+     profile set commute
+     ```
+     Verify buzzer volume clamps to 0%, 25%, and 100% respectively.
+  3. Test cognitive sensory overload mitigation:
+     ```bash
+     profile overload on
+     profile status --json
+     profile overload off
+     ```
+     Verify overload immediately silences all audio to 0% and suppresses audible alerts, then restores base volume on deactivation.
+  4. Test critical system alert engine:
+     Verify `evaluate_alerts()` triggers CRITICAL alerts for battery <=5%, thermals >=80°C, and memory <50MB, with audible alerts properly suppressed in sensory overload mode.
+  5. Test monochrome sunlight theme:
+     Verify `mono-high-contrast.json` achieves 21.0:1 contrast ratio.
+  6. Verify strict <= 53 column enforcement across `wf power` and `wf profile` CLI output.
+* **Pass / Fail Criteria:**
+  * **PASS:** All 3 power profiles persist and apply; all 3 sensory presets function; overload muting operates instantly; alert thresholds evaluate correctly; contrast is 21:1; CLI lines are <= 53 columns.
+  * **FAIL:** Profile state fails to persist; overload fails to mute audio; alerts trigger audible sound during overload; output exceeds 53 columns.
+* **Rollback:** `power-profile set active && profile set office && profile overload off`
+
+---
+
 ## 3. Acceptance Verification Summary Matrix
 
 | Test Plan ID | Subsystem | Target Milestone | Automation Level | Test Command / Script | Status |
@@ -335,3 +385,4 @@ Each test plan defines the preconditions, step-by-step commands, expected output
 | **ATP-10** | Coprocessor Blitting| `v0` | Fully Automated | `test/prop_terminal_protocol.py`, `pi/terminal/splash.py` | `VERIFIED` |
 | **ATP-11** | Workspaces | `v0` | Fully Automated & Hardware | `scripts/reliability/test_terminal_pty_soak.py` | `VERIFIED` |
 | **ATP-12** | Offline Docs | `v0` | Fully Automated | `test/test_wiki_helper.py`, `pi/bin/wiki echo` | `VERIFIED` |
+| **ATP-13** | Power & Sensory Core | `v0` | Fully Automated | `scripts/run_all_acceptance_tests.py` | `VERIFIED` |
