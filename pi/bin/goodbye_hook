@@ -135,10 +135,9 @@ def send_goodbye(
         ser.write(clear_frame)
         ser.flush()
 
-        # 2. Stream centered doodle image chunks at y=36
-        _stream_image_chunks(ser, blob, start_time, y_pos=36)
-
-        # 3. Render crisp subtitle text below icon
+        # 2. Render crisp subtitle text below icon ("brb :3" / "bai baiii!")
+        # Rendered immediately after background clear so operator gets instant feedback
+        # without waiting ~2.8s for 32KB image chunks to stream over 115200 baud serial.
         subtitle = "brb :3" if mode == "reboot" else "bai baiii!"
         text_cmd = serialize(
             DrawText(
@@ -154,6 +153,9 @@ def send_goodbye(
         ser.write(text_cmd)
         ser.flush()
 
+        # 3. Stream centered doodle image chunks at y=36
+        _stream_image_chunks(ser, blob, start_time, y_pos=36)
+
         # 4. Hold display for operator-specified duration
         elapsed = time.monotonic() - start_time
         remaining_hold = max(0.0, min(hold_s, _MAX_TOTAL_TIMEOUT_S - elapsed - 0.2))
@@ -168,6 +170,9 @@ def send_goodbye(
             ser.write(black_frame)
             ser.write(serialize(DisplaySleep()))
             ser.flush()
+            # Display shutdown synchronization: allow coprocessor UART FIFO and
+            # display controller to complete DISPOFF/SLPIN before port close.
+            time.sleep(0.15)
     except Exception:  # noqa: BLE001, S110
         pass
     finally:

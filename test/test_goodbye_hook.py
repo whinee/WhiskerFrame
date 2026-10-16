@@ -114,7 +114,7 @@ class TestGoodbyeHook(unittest.TestCase):
                 hold_s=1.0,
             )
 
-        mock_sleep.assert_called_once()
+        self.assertEqual(mock_sleep.call_count, 2)
         mock_ser.close.assert_called_once()
 
         # Check first frame (clear to theme bg)
@@ -122,7 +122,18 @@ class TestGoodbyeHook(unittest.TestCase):
         self.assertIsInstance(first_cmd, DrawRect)
         self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
 
-        # Check subtitle text frame
+        # Check second frame (subtitle text rendered before image streaming)
+        second_cmd = decode(written_frames[1])
+        self.assertIsInstance(second_cmd, DrawText)
+        self.assertEqual(second_cmd.text, "bai baiii!")
+        self.assertEqual(second_cmd.x, 160)
+        self.assertEqual(second_cmd.y, 184)
+
+        # Check third frame (image chunks start after text)
+        third_cmd = decode(written_frames[2])
+        self.assertIsInstance(third_cmd, DrawImage)
+
+        # Check subtitle text frame in written frames
         text_frames = [
             cmd for f in written_frames if isinstance((cmd := decode(f)), DrawText)
         ]
@@ -161,6 +172,17 @@ class TestGoodbyeHook(unittest.TestCase):
         first_cmd = decode(written_frames[0])
         self.assertIsInstance(first_cmd, DrawRect)
         self.assertEqual(first_cmd.color, goodbye_hook._THEME_BG)
+
+        # Check second frame (subtitle text rendered before image streaming)
+        second_cmd = decode(written_frames[1])
+        self.assertIsInstance(second_cmd, DrawText)
+        self.assertEqual(second_cmd.text, "brb :3")
+        self.assertEqual(second_cmd.x, 160)
+        self.assertEqual(second_cmd.y, 184)
+
+        # Check third frame (image chunks start after text)
+        third_cmd = decode(written_frames[2])
+        self.assertIsInstance(third_cmd, DrawImage)
 
         # Check subtitle text frame
         text_frames = [
