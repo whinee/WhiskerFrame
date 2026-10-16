@@ -72,6 +72,7 @@ static const uint8_t kOpcodeDrawRect = 0x02;
 static const uint8_t kOpcodeDrawCells = 0x03;  // run of fixed-cell glyphs
 static const uint8_t kOpcodeScroll = 0x04;     // shift a row band up/down
 static const uint8_t kOpcodeDrawImage = 0x05;  // raw RGB565 pixel block
+static const uint8_t kOpcodeSleep = 0x06;      // low-power display sleep
 static const uint8_t kOpcodeClear = 0x10;
 static const uint8_t kOpcodeFlush = 0x1F;
 
@@ -101,8 +102,8 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
 inline bool is_known_opcode(uint8_t opcode) {
   return opcode == kOpcodeDrawText || opcode == kOpcodeDrawRect ||
          opcode == kOpcodeDrawCells || opcode == kOpcodeScroll ||
-         opcode == kOpcodeDrawImage || opcode == kOpcodeClear ||
-         opcode == kOpcodeFlush;
+         opcode == kOpcodeDrawImage || opcode == kOpcodeSleep ||
+         opcode == kOpcodeClear || opcode == kOpcodeFlush;
 }
 
 // -- Frame decoder ----------------------------------------------------------

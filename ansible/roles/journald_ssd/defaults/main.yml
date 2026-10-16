@@ -1,0 +1,13 @@
+---
+# Defaults for the journald_ssd role (TSK-03). Override when enabling.
+#
+# NOTE: ssd_mount_point is normally provided by group_vars/cyberdeck.yml, derived
+# from .whiskerframe.yaml (storage.mount_point). This value is only a last-resort
+# fallback if that lookup is unavailable; group_vars wins.
+ssd_mount_point: /mnt/storage
+# Journald persistent store location on the SSD.
+journald_dir: "{{ ssd_mount_point }}/log/journal"
+# Cap persistent journal size (SD/SSD wear + bounded disk use).
+journald_max_use: "200M"
+# log2ram RAM buffer size for /var/log.
+log2ram_size: "128M"

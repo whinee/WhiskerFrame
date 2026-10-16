@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Managed by Ansible: guest_demo role
+# Whiskerframe Cyberdeck Demo Utility
+
+clear
+echo "====================================================="
+echo "       Whiskerframe Cyberdeck v0.1 Demo Sandbox      "
+echo "====================================================="
+echo ""
+echo "Welcome, guest! Restricted kernel sandbox:"
+echo " - Network: 100% Isolated (nftables egress drop)"
+echo " - Memory: 64MB Cgroup Slice | CPU Quota: 50%"
+echo " - Execution Limit: 5s max / process (Reaper)"
+echo " - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)"
+echo ""
+echo "--- Live Deck Telemetry ---"
+echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+if [ -f /run/battery_monitor/status.json ]; then
+    V=$(grep -o '"bus_voltage_v": *[0-9.]*' /run/battery_monitor/status.json 2>/dev/null | awk '{print $2}')
+    P=$(grep -o '"battery_percent": *[0-9.]*' /run/battery_monitor/status.json 2>/dev/null | awk '{print $2}')
+    echo "Power: ${V:-12.4}V (${P:-95}% battery)"
+fi
+if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+    T_RAW=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+    T_C=$(awk "BEGIN {printf \"%.1f°C\", ${T_RAW:-60000}/1000}")
+    echo "Thermals: $T_C"
+else
+    echo "Thermals: 60.0°C"
+fi
+echo "Memory Available: $(free -h | awk '/Mem:/ {print $7}')"
+echo ""
+echo "Try running safe commands, or type 'exit' to log out."
+echo "====================================================="

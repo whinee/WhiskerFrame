@@ -1,0 +1,17 @@
+# dnsmasq config for AP FALLBACK — managed by Ansible (network_automation).
+# Scoped to {{ ap_interface }} only; serves DHCP so the operator can reach the
+# box when it is in AP mode. Started/stopped by the arbiter, never standalone.
+
+interface={{ ap_interface }}
+# Bind only to the AP interface so dnsmasq never answers on client-mode links.
+bind-interfaces
+# Do not read /etc/resolv.conf; this is an isolated fallback AP.
+no-resolv
+no-hosts
+
+dhcp-range={{ ap_dhcp_range_start }},{{ ap_dhcp_range_end }},{{ ap_netmask }},{{ ap_dhcp_lease_time }}
+dhcp-option=option:router,{{ ap_static_ip }}
+dhcp-option=option:dns-server,{{ ap_static_ip }}
+
+# Keep leases on tmpfs-friendly path; small box, short-lived AP sessions.
+dhcp-authoritative

@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""
+WhiskerFrame Sensory & Environmental Audio Profile CLI (REQ-ENV-04, REQ-INP-08, DEC-W17).
+
+Manages three environmental audio presets and the sensory overload silence toggle:
+  1. CLASSROOM / SILENT: Buzzer muted (0%), haptics off, visual bell only, alerts visual-only.
+  2. OFFICE / QUIET: Buzzer low (25%), haptics low, bell enabled, alerts quiet.
+  3. COMMUTE / LOUD: Buzzer full (100%), haptics full, bell enabled, alerts full volume.
+
+Sensory Overload Toggle (REQ-INP-08):
+  Instantly mutes all buzzers, tickers, and auxiliary signals, restricting output to
+  the primary terminal prompt in a calm, low-stimulation state.
+
+Formatted strictly <= 53 columns or as machine-readable JSON.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import os
+import sys
+import textwrap
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+MAX_COLUMNS: int = 53
+STATE_DIRS: list[Path] = [
+    Path("/run/whiskerframe"),
+    Path("/tmp/whiskerframe"),  # noqa: S108
+    Path("/tmp"),  # noqa: S108
+]
+STATE_FILE_NAME: str = "sensory_profile.json"
+
+PROFILES: dict[str, dict[str, Any]] = {
+    "classroom": {
+        "name": "CLASSROOM",
+        "description": "Silent stance: buzzer muted, haptics off, visual alerts only",
+        "buzzer_volume": 0,
+        "haptics_enabled": False,
+        "bell_mode": "visual",
+        "alerts_audible": False,
+    },
+    "office": {
+        "name": "OFFICE",
+        "description": "Quiet stance: buzzer low (25%), gentle haptics, soft alerts",
+        "buzzer_volume": 25,
+        "haptics_enabled": True,
+        "bell_mode": "audible",
+        "alerts_audible": True,
+    },
+    "commute": {
+        "name": "COMMUTE",
+        "description": "Loud stance: buzzer full (100%), strong haptics, max alerts",
+        "buzzer_volume": 100,
+        "haptics_enabled": True,
+        "bell_mode": "audible",
+        "alerts_audible": True,
+    },
+}
+
+PROFILE_ALIASES: dict[str, str] = {
+    "classroom": "classroom",
+    "silent": "classroom",
+    "mute": "classroom",
+    "quiet_mode": "classroom",
+    "office": "office",
+    "quiet": "office",
+    "normal": "office",
+    "commute": "commute",
+    "loud": "commute",
+    "transit": "commute",
+    "outdoor": "commute",
+}
+
+
+def wrap_text(text: str, width: int = MAX_COLUMNS) -> list[str]:
+    """Wrap multiline or long text strictly within width columns."""
+    if not text:
+        return [""]
+    out: list[str] = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            out.append(line)
+        else:
+            out.extend(textwrap.wrap(line, width=width, break_long_words=True))
+    return out
+
+
+def print_bounded(*args: Any, sep: str = " ") -> None:
+    """Print message with all lines strictly constrained to MAX_COLUMNS."""
+    raw = sep.join(str(a) for a in args)
+    for line in wrap_text(raw, MAX_COLUMNS):
+        print(line)
+
+
+def get_state_path() -> Path:
+    """Resolve writable path for state persistence."""
+    override = os.environ.get("WHISKERFRAME_SENSORY_STATE")
+    if override:
+        return Path(override)
+    for d in STATE_DIRS:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            candidate = d / STATE_FILE_NAME
+            if candidate.exists() or os.access(str(d), os.W_OK):
+                return candidate
+        except (OSError, PermissionError):
+            continue
+    return Path("/tmp") / STATE_FILE_NAME  # noqa: S108
+
+
+@dataclass
+class SensoryState:
+    profile: str
+    buzzer_volume: int
+    haptics_enabled: bool
+    bell_mode: str
+    alerts_audible: bool
+    overload_active: bool
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def load_state() -> SensoryState:
+    """Load stored sensory state, defaulting to office."""
+    path = get_state_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            prof = data.get("profile", "office").lower()
+            if prof in PROFILES:
+                return SensoryState(
+                    profile=prof,
+                    buzzer_volume=int(data.get("buzzer_volume", PROFILES[prof]["buzzer_volume"])),
+                    haptics_enabled=bool(data.get("haptics_enabled", PROFILES[prof]["haptics_enabled"])),
+                    bell_mode=str(data.get("bell_mode", PROFILES[prof]["bell_mode"])),
+                    alerts_audible=bool(data.get("alerts_audible", PROFILES[prof]["alerts_audible"])),
+                    overload_active=bool(data.get("overload_active", False)),
+                    updated_at=str(data.get("updated_at", "")),
+                )
+        except (OSError, ValueError):
+            pass
+
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return SensoryState(
+        profile="office",
+        buzzer_volume=PROFILES["office"]["buzzer_volume"],
+        haptics_enabled=PROFILES["office"]["haptics_enabled"],
+        bell_mode=PROFILES["office"]["bell_mode"],
+        alerts_audible=PROFILES["office"]["alerts_audible"],
+        overload_active=False,
+        updated_at=now_str,
+    )
+
+
+def save_state(state: SensoryState) -> None:
+    """Persist sensory profile state."""
+    path = get_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+    except (OSError, PermissionError):
+        pass
+
+
+def apply_profile(profile_key: str, keep_overload: bool = False) -> SensoryState:
+    """Apply the specified environmental audio profile."""
+    key = PROFILE_ALIASES.get(profile_key.lower().strip())
+    if not key or key not in PROFILES:
+        raise ValueError(f"Unknown sensory profile '{profile_key}'. Valid: {list(PROFILES.keys())}")
+
+    current = load_state()
+    spec = PROFILES[key]
+    overload = current.overload_active if keep_overload else False
+
+    # When overload is active, audible outputs remain strictly muted
+    eff_volume = 0 if overload else spec["buzzer_volume"]
+    eff_haptics = False if overload else spec["haptics_enabled"]
+    eff_bell = "visual" if overload else spec["bell_mode"]
+    eff_alerts = False if overload else spec["alerts_audible"]
+
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    new_state = SensoryState(
+        profile=key,
+        buzzer_volume=eff_volume,
+        haptics_enabled=eff_haptics,
+        bell_mode=eff_bell,
+        alerts_audible=eff_alerts,
+        overload_active=overload,
+        updated_at=now_str,
+    )
+    save_state(new_state)
+    return new_state
+
+
+def set_overload(active: bool | None = None) -> SensoryState:
+    """Toggle or explicitly set sensory overload mitigation state (REQ-INP-08)."""
+    current = load_state()
+    target = not current.overload_active if active is None else bool(active)
+
+    spec = PROFILES.get(current.profile, PROFILES["office"])
+    eff_volume = 0 if target else spec["buzzer_volume"]
+    eff_haptics = False if target else spec["haptics_enabled"]
+    eff_bell = "visual" if target else spec["bell_mode"]
+    eff_alerts = False if target else spec["alerts_audible"]
+
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    new_state = SensoryState(
+        profile=current.profile,
+        buzzer_volume=eff_volume,
+        haptics_enabled=eff_haptics,
+        bell_mode=eff_bell,
+        alerts_audible=eff_alerts,
+        overload_active=target,
+        updated_at=now_str,
+    )
+    save_state(new_state)
+    return new_state
+
+
+# --- CLI Commands ------------------------------------------------------------
+
+
+def cmd_status(json_output: bool = False) -> int:
+    """Display sensory and audio profile state."""
+    state = load_state()
+    spec = PROFILES.get(state.profile, PROFILES["office"])
+
+    if json_output:
+        out = state.to_dict()
+        out["spec"] = spec
+        print(json.dumps(out, indent=2))
+        return 0
+
+    print_bounded("=== WhiskerFrame Sensory Profile ===")
+    print_bounded(f"Profile:     {spec['name']}")
+    if state.overload_active:
+        print_bounded("OVERLOAD:    ACTIVE (All audio silenced)")
+    else:
+        print_bounded("OVERLOAD:    Inactive (Normal operation)")
+    print_bounded(f"Buzzer Vol:  {state.buzzer_volume}%")
+    print_bounded(f"Haptics:     {'Enabled' if state.haptics_enabled else 'Disabled (Muted)'}")
+    print_bounded(f"Bell Mode:   {state.bell_mode.capitalize()}")
+    print_bounded(f"Alert Audio: {'Audible' if state.alerts_audible else 'Muted (Visual only)'}")
+    if state.updated_at:
+        print_bounded(f"Applied:     {state.updated_at[:19]}")
+    print_bounded("")
+    print_bounded("Profiles: classroom, office, commute")
+    print_bounded("Commands: profile set <name>, profile overload")
+    return 0
+
+
+def cmd_set(target: str, json_output: bool = False) -> int:
+    """Set sensory profile preset."""
+    try:
+        new_state = apply_profile(target)
+    except ValueError as err:
+        if json_output:
+            print(json.dumps({"error": str(err)}, indent=2))
+        else:
+            print_bounded(f"Error: {err}")
+        return 1
+
+    if json_output:
+        print(json.dumps(new_state.to_dict(), indent=2))
+        return 0
+
+    spec = PROFILES[new_state.profile]
+    print_bounded(f"Switched to sensory profile: {spec['name']}")
+    print_bounded(f"  Buzzer Volume: {new_state.buzzer_volume}%")
+    print_bounded(f"  Haptics:       {'Enabled' if new_state.haptics_enabled else 'Disabled'}")
+    print_bounded(f"  Alert Audio:   {'Audible' if new_state.alerts_audible else 'Visual-only'}")
+    return 0
+
+
+def cmd_overload(arg: str | None = None, json_output: bool = False) -> int:
+    """Control sensory overload toggle."""
+    active: bool | None = None
+    if arg:
+        lower = arg.lower().strip()
+        if lower in ("on", "true", "1", "enable", "silence"):
+            active = True
+        elif lower in ("off", "false", "0", "disable", "restore"):
+            active = False
+        elif lower in ("toggle",):
+            active = None
+        else:
+            print_bounded(f"Error: Unknown overload parameter '{arg}'. Use on, off, or toggle.")
+            return 1
+
+    new_state = set_overload(active)
+    if json_output:
+        print(json.dumps(new_state.to_dict(), indent=2))
+        return 0
+
+    if new_state.overload_active:
+        print_bounded("=== SENSORY OVERLOAD MITIGATION ACTIVE ===")
+        print_bounded("All buzzers, chimes, and tickers silenced.")
+        print_bounded("Display and prompt set to calm stance.")
+        print_bounded("Run 'profile overload off' to restore.")
+    else:
+        spec = PROFILES[new_state.profile]
+        print_bounded("=== Sensory Overload Mitigation Cleared ===")
+        print_bounded(f"Restored normal audio for profile: {spec['name']}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    parser = argparse.ArgumentParser(
+        prog="profile",
+        description="WhiskerFrame Sensory & Environmental Audio Profile CLI (REQ-ENV-04, REQ-INP-08)",
+        add_help=False,
+    )
+    parser.add_argument("command", nargs="?", default="status", help="Command: status, set, overload, silence, classroom, office, commute")
+    parser.add_argument("target", nargs="?", default=None, help="Target profile or overload setting")
+    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    parser.add_argument("-h", "--help", action="store_true", help="Show usage help")
+
+    args = parser.parse_args(argv)
+
+    if args.help:
+        print_bounded("=== WhiskerFrame Sensory Profiles ===")
+        print_bounded("Usage:")
+        print_bounded("  profile [status] [--json]")
+        print_bounded("  profile set <classroom|office|commute>")
+        print_bounded("  profile overload [on|off|toggle]")
+        print_bounded("  profile silence")
+        print_bounded("")
+        print_bounded("Profiles (REQ-ENV-04):")
+        print_bounded("  classroom   Buzzer muted, haptics off, visual alerts")
+        print_bounded("  office      25% buzzer, gentle haptics, soft alerts")
+        print_bounded("  commute     100% buzzer, full haptics, loud alerts")
+        print_bounded("")
+        print_bounded("Overload Toggle (REQ-INP-08):")
+        print_bounded("  Instant full-system silence and calm display.")
+        return 0
+
+    cmd = (args.command or "status").lower().strip()
+
+    if cmd == "status":
+        return cmd_status(json_output=args.json)
+    elif cmd == "set":
+        target = args.target
+        if not target:
+            print_bounded("Error: 'set' requires a target profile.")
+            print_bounded("Usage: profile set <classroom|office|commute>")
+            return 1
+        return cmd_set(target, json_output=args.json)
+    elif cmd in ("overload", "sensory"):
+        return cmd_overload(args.target, json_output=args.json)
+    elif cmd in ("silence", "mute", "panic"):
+        return cmd_overload("on", json_output=args.json)
+    elif cmd in PROFILE_ALIASES:
+        return cmd_set(cmd, json_output=args.json)
+    else:
+        print_bounded(f"Error: Unknown command '{cmd}'.")
+        print_bounded("Valid commands: status, set, overload, silence, classroom, office, commute")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

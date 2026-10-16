@@ -1,0 +1,173 @@
+---
+# TSK-04 — Komodo 2.0 + FerretDB clean deploy via Docker Compose.
+#
+# INVARIANT: the health check runs Pi python through uv (uv-in-venv). Secrets are
+# generated once (openssl rand -hex 32), written only to .env.komodo (0600), and
+# never logged (no_log). Images are pinned; periphery is dropped (RAM).
+#
+# RAM NOTE: the Pi Zero 2W has ~416MB. Per-service mem_limits sum ~384m. First
+# `compose up` pulls images + inits the DB and will lean on zram swap. Watch
+# `dmesg | grep -i oom` on bring-up.
+
+# --- Docker install (arm64 / Debian trixie) -------------------------------
+- name: Install Docker apt prerequisites
+  ansible.builtin.apt:
+    name: [ca-certificates, curl]
+    state: present
+    update_cache: true
+
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add Docker's apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add the Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture | replace('aarch64', 'arm64') }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker engine + compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Put the Docker data-root on the SSD (spares the SD card)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ {'data-root': docker_data_root} | to_nice_json }}\n"
+    mode: "0644"
+  notify: restart docker
+
+- name: Enable Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+# Apply the data-root change before any compose task touches the daemon.
+- name: Apply pending Docker restart
+  ansible.builtin.meta: flush_handlers
+
+# --- Project directories (on the SSD) -------------------------------------
+- name: Create the Komodo project and backups directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ komodo_project_dir }}"
+    - "{{ komodo_backups_path }}"
+
+# --- Idempotent purge of any prior stack ----------------------------------
+- name: Check for an existing compose file
+  ansible.builtin.stat:
+    path: "{{ komodo_project_dir }}/compose.yaml"
+  register: komodo_compose_stat
+
+- name: Tear down any existing Komodo stack (clean redeploy)
+  community.docker.docker_compose_v2:
+    project_src: "{{ komodo_project_dir }}"
+    state: absent
+  when: komodo_compose_stat.stat.exists
+  failed_when: false
+
+# --- Secrets: generate once, read back thereafter -------------------------
+- name: Check for an existing .env.komodo
+  ansible.builtin.stat:
+    path: "{{ komodo_env_file }}"
+  register: komodo_env_stat
+
+- name: Generate stack secrets (first run only)
+  ansible.builtin.command: openssl rand -hex 32
+  register: komodo_secret_gen
+  changed_when: true
+  no_log: true
+  loop:
+    - db_password
+    - admin_password
+    - webhook_secret
+    - jwt_secret
+  when: not komodo_env_stat.stat.exists
+
+- name: Bind generated secrets to facts (first run only)
+  ansible.builtin.set_fact:
+    komodo_db_password: "{{ komodo_secret_gen.results[0].stdout }}"
+    komodo_admin_password: "{{ komodo_secret_gen.results[1].stdout }}"
+    komodo_webhook_secret: "{{ komodo_secret_gen.results[2].stdout }}"
+    komodo_jwt_secret: "{{ komodo_secret_gen.results[3].stdout }}"
+  no_log: true
+  when: not komodo_env_stat.stat.exists
+
+- name: Read back existing secrets (subsequent runs — no rotation)
+  when: komodo_env_stat.stat.exists
+  no_log: true
+  block:
+    - name: Slurp the existing env file
+      ansible.builtin.slurp:
+        src: "{{ komodo_env_file }}"
+      register: komodo_env_raw
+
+    - name: Parse existing secrets into facts
+      ansible.builtin.set_fact:
+        komodo_env_map: >-
+          {{ dict(
+               (komodo_env_raw.content | b64decode).splitlines()
+               | select('match', '^[A-Z].*=')
+               | map('split', '=', 1)
+             ) }}
+
+    - name: Rebind secrets from the parsed map
+      ansible.builtin.set_fact:
+        komodo_db_password: "{{ komodo_env_map.KOMODO_DATABASE_PASSWORD }}"
+        komodo_admin_password: "{{ komodo_env_map.KOMODO_INIT_ADMIN_PASSWORD }}"
+        komodo_webhook_secret: "{{ komodo_env_map.KOMODO_WEBHOOK_SECRET }}"
+        komodo_jwt_secret: "{{ komodo_env_map.KOMODO_JWT_SECRET }}"
+
+# --- Render compose + env, then deploy ------------------------------------
+- name: Render the compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ komodo_project_dir }}/compose.yaml"
+    mode: "0644"
+
+- name: Render the .env.komodo (0600, never logged)
+  ansible.builtin.template:
+    src: env.komodo.j2
+    dest: "{{ komodo_env_file }}"
+    mode: "0600"
+  no_log: true
+
+- name: Deploy the Komodo stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ komodo_project_dir }}"
+    env_files: ["{{ komodo_env_file }}"]
+    state: present
+    pull: missing
+
+# --- Health check via uv (uv-in-venv invariant) ---------------------------
+- name: Wait for Komodo Core to report healthy
+  ansible.builtin.command: "{{ uv_bin }} run python -m komodo.healthcheck"
+  args:
+    chdir: "{{ deploy_root }}/pi"
+  register: komodo_health
+  changed_when: false
+  retries: 20
+  delay: 15
+  until: komodo_health.rc == 0

@@ -47,12 +47,37 @@ static TFT_eSPI tft = TFT_eSPI();
 // Byte-at-a-time frame decoder for the serial command stream.
 static cyd_display_link::FrameDecoder decoder;
 
+// Low-power display sleep state tracking.
+static bool is_sleeping = false;
+
+// Host supervisory watchdog tracking (REQ-HW-07, DEC-W18).
+// Supervise host activity over UART; if link freezes >60s, render crash warning.
+static const unsigned long kHostWatchdogTimeoutMs = 60000;
+static unsigned long last_packet_time = 0;
+static bool host_ever_seen = false;
+static bool watchdog_warning_active = false;
+
 // -- Dispatch ----------------------------------------------------------------
 
 // Route one complete, validated frame from `decoder` to the matching renderer.
 // Called only after decoder.feed() returns true, so the opcode is known and the
 // payload/payload_len are valid until the next feed() (Req 1.2, 2.1).
 static void dispatch(cyd_display_link::FrameDecoder& dec) {
+  last_packet_time = millis();
+  host_ever_seen = true;
+  if (watchdog_warning_active) {
+    watchdog_warning_active = false;
+  }
+
+  if (is_sleeping && dec.opcode() != cyd_display_link::kOpcodeSleep) {
+    tft.writecommand(ILI9341_SLPOUT);
+    delay(120);
+    tft.writecommand(ILI9341_DISPON);
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);
+    is_sleeping = false;
+  }
+
   switch (dec.opcode()) {
     case cyd_display_link::kOpcodeDrawText:
       cyd_display_link::render_text(tft, dec.payload(), dec.payload_len());
@@ -68,6 +93,10 @@ static void dispatch(cyd_display_link::FrameDecoder& dec) {
       break;
     case cyd_display_link::kOpcodeDrawImage:
       cyd_display_link::render_image(tft, dec.payload(), dec.payload_len());
+      break;
+    case cyd_display_link::kOpcodeSleep:
+      cyd_display_link::render_sleep(tft, dec.payload(), dec.payload_len());
+      is_sleeping = true;
       break;
     // kOpcodeClear / kOpcodeFlush are reserved (see design "Opcodes"); the
     // frame layer accepts them, but they are outside the current render surface,
@@ -104,6 +133,19 @@ void loop() {
     }
     if (decoder.feed(static_cast<uint8_t>(b))) {
       dispatch(decoder);
+    }
+  }
+
+  // Supervisory host watchdog check (REQ-HW-07, DEC-W18)
+  // If host stops communicating for >60s while active, display recovery warning.
+  if (host_ever_seen && !is_sleeping) {
+    const unsigned long now = millis();
+    if (!watchdog_warning_active && (now - last_packet_time > kHostWatchdogTimeoutMs)) {
+      watchdog_warning_active = true;
+      tft.fillRect(0, 0, 320, 16, TFT_RED);
+      tft.setTextColor(TFT_WHITE, TFT_RED);
+      tft.setTextSize(1);
+      tft.drawString("! HOST LINK LOST (>60s) - RECOVERY", 4, 4);
     }
   }
 }

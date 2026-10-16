@@ -1,0 +1,13 @@
+--- a/.kiro/settings/permissions.yaml
++++ b/.kiro/settings/permissions.yaml
+@@ -1,5 +1,12 @@
+ rules:
++  - capability: guard_hook
++    hook: pre_tool_use
++    tools: ["write", "edit", "shell", "bash"]
++    command: "/home/lyra/.config/agent-policy/bin/spec-interview-guard"
++    effect: enforce
++    fail_closed: true
+   - capability: web_fetch
+     effect: allow
+     match:

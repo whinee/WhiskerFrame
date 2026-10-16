@@ -353,9 +353,10 @@ This daemon ties together the CYD serial display (Section C), the CardKB
    shell for that user renders on the CYD; typing echoes. Run `logout` (or exit
    the shell) to return to the login screen.
 
-5. **Resize (optional):** press `Ctrl+]` (CardKB byte `0x1d`) in the shell to
+5. **Resize (optional):** press `Fn+Del` (CardKB byte `0x8B`) in the shell to
    cycle the font size through 1 → 2 → 3 (grids 53x30 / 26x15 / 17x10). The chord
-   is ignored on the login screen.
+   is ignored on the login screen. (The old `Ctrl+]`/`0x1d` chord was unreachable —
+   the CardKB has no Ctrl key.)
 
 Privilege note: `terminal.service` runs as **root** with `NoNewPrivileges=false`
 so the bridge can `su - <user>` into any configured account after a correct

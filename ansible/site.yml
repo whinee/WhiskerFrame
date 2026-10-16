@@ -1,0 +1,43 @@
+---
+# Top-level cyberdeck play. Runs from the dev host against the Pi over SSH.
+#
+# INVARIANT: any task that runs Python on the Pi must go through the uv-managed
+# target venv — `{{ venv_path }}/bin/uv run ...` — never system python. Keeps
+# deps deterministic and RAM overhead low on the Pi Zero 2W.
+#
+# Destructive storage steps (TSK-02a SSD reformat) are DELIBERATELY NOT here.
+# They stay human-gated per spec docs/specifications/storage-mount.md (§2.4) / DEC-W7. No role below formats, mounts,
+# or wipes anything.
+- name: Cyberdeck host configuration
+  hosts: cyberdeck
+  gather_facts: true
+  become: true
+  roles:
+    # Storage & logging layer
+    - role: journald_ssd
+      tags: [journald]
+    # Wi-Fi cold boot persistence & radio unblock layer (Phase 2)
+    - role: wifi_persistence
+      tags: [wifi_persistence, wifi]
+    # Network self-healing & hardware watchdog layer (Phase 3)
+    - role: self_heal_watchdog
+      tags: [self_heal_watchdog, self_heal, watchdog]
+    # Memory safety layer (SSD swap backstop, swappiness, earlyoom)
+    - role: memory_safety
+      tags: [memory_safety]
+    # Native self-hosted services (Git, Syncthing, File Browser)
+    - role: native_services
+      tags: [native_services]
+    # NetBird mesh VPN overlay (TSK-07 / WS-I)
+    - role: netbird
+      tags: [netbird, native_services]
+    # Guest demo user & kernel-level isolation (Phase 5)
+    - role: guest_demo
+      tags: [guest_demo, demo]
+    # Offline network automation (client mode + fallback AP) — TSK-05. STAGED by
+    # default: network_automation_apply=false means a plain `site.yml` installs
+    # config/units but does NOT cut the live network on this headless remote box.
+    - role: network_automation
+      vars:
+        network_automation_apply: false
+      tags: [network_automation, network]

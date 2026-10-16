@@ -38,6 +38,8 @@ _KEY_ENTER: frozenset[int] = frozenset({0x0D, 0x0A})
 _KEY_BACKSPACE: frozenset[int] = frozenset({0x08, 0x7F})
 _KEY_UP: int = 0xB5  # M5Stack CardKB up arrow
 _KEY_DOWN: int = 0xB6  # M5Stack CardKB down arrow
+_KEY_LEFT: int = 0xB4  # M5Stack CardKB left arrow
+_KEY_ESC: int = 0x1B  # Escape key
 _PRINTABLE_MIN: int = 0x20
 _PRINTABLE_MAX: int = 0x7E
 
@@ -192,18 +194,44 @@ class LoginState:
         `SubmitEvent | None`: The submission when enter is pressed, else ``None``.
 
         """
+        if key in (_KEY_LEFT, _KEY_ESC):
+            self.reset_to_user_select()
+            return None
         if key in _KEY_ENTER:
+            if not self._password:
+                return None
             return SubmitEvent(
                 user=self.selected_user,
                 password="".join(self._password),
             )
-        if key in _KEY_BACKSPACE:
-            if self._password:
-                self._password.pop()
-            return None
-        if _PRINTABLE_MIN <= key <= _PRINTABLE_MAX:
-            self._password.append(chr(key))
+        self._update_password_buffer(key)
         return None
+
+    def _update_password_buffer(self, key: int) -> None:
+        """
+        Modify the password buffer for backspace or printable keystrokes.
+
+        Args:
+        - key (`int`): The CardKB key byte.
+
+        Returns:
+        `None`: The hidden buffer is updated in place.
+
+        """
+        if key in _KEY_BACKSPACE and self._password:
+            self._password.pop()
+        elif _PRINTABLE_MIN <= key <= _PRINTABLE_MAX:
+            self._password.append(chr(key))
+
+    def clear_password(self) -> None:
+        """
+        Clear the hidden password buffer without changing the screen.
+
+        Returns:
+        `None`: Hidden buffer is cleared in place.
+
+        """
+        self._password = []
 
     def reset_to_user_select(self) -> None:
         """

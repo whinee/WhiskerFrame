@@ -1,0 +1,27 @@
+[Unit]
+Description=File Browser (native) — web file manager
+After=network-online.target {{ ssd_mount_point | regex_replace('^/', '') | regex_replace('/', '-') }}.mount
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ filebrowser_user }}
+Group={{ filebrowser_user }}
+ExecStart={{ filebrowser_bin }} \
+  --address {{ filebrowser_address }} \
+  --port {{ filebrowser_port }} \
+  --database {{ filebrowser_db }} \
+  --root {{ filebrowser_root }}
+Restart=on-failure
+RestartSec=5
+# Memory ceiling — no single service may thrash the 416MB Pi (DEC-W10).
+MemoryMax={{ filebrowser_mem_max }}
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths={{ filebrowser_root }} {{ filebrowser_config_dir }}
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

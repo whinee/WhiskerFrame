@@ -43,10 +43,10 @@ ai-prompt.md
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 cyd_factory_backup.bin
+vault.yml
 
 # User-defined Unignored Files
 !.env.example
-!.whiskerframe.yaml
 
 ################################################################################
 #                                 GITIGNORE.IO                                 #
@@ -473,5 +473,19 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/node,linux,macos,python,freecad,windows,platformio,visualstudiocode
 
-# Cyberdeck: live config is per-user/gitignored; example is the committed template
-!.whiskerframe.example.yaml
+docs/dev/spec-interview/
+docs/dev/spec-interview-archives/
+
+# Derived art and screen build outputs (unmodified originals and scripts stay in repo)
+*.rgb565
+assets/images/cess/*.rgb565
+assets/images/cess/*-derived.*
+assets/images/cess/*-preview.*
+assets/images/cess/*-composite.*
+assets/images/*-preview.*
+assets/images/goodbye*
+
+# Firmware distribution binaries
+!firmware/dist/
+!firmware/dist/**
+

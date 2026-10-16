@@ -1,0 +1,5 @@
+# Managed by Ansible: self_heal_watchdog role
+# Configures systemd hardware watchdog supervision.
+[Manager]
+RuntimeWatchdogSec={{ watchdog_runtime_sec }}
+RebootWatchdogSec={{ watchdog_reboot_sec }}

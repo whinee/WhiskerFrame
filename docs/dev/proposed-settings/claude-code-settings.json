@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/lyra/.config/agent-policy/bin/spec-interview-guard",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

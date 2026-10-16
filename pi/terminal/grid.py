@@ -118,9 +118,18 @@ class Grid:
         self.default_bg = default_bg
         self.cursor_row = 0
         self.cursor_col = 0
+        self.dirty: bool = False
+        self._wrapped: list[bool] = [False] * rows
+        self._scrollback: list[tuple[list[Cell], bool]] = []
+        self.max_scrollback: int = 200
         self._cells: list[list[Cell]] = [
             [self._blank() for _ in range(cols)] for _ in range(rows)
         ]
+
+    @property
+    def scrollback(self) -> list[tuple[list[Cell], bool]]:
+        """Return the scrollback buffer lines (read-only snapshot)."""
+        return list(self._scrollback)
 
     def _blank(self) -> Cell:
         """
@@ -199,6 +208,7 @@ class Grid:
             self._cells[self.cursor_row][self.cursor_col] = Cell(char[:1], fg, bg)
         self.cursor_col += 1
         if self.cursor_col >= self.cols:
+            self._wrapped[self.cursor_row] = True
             self.cursor_col = 0
             self.newline()
 
@@ -262,8 +272,10 @@ class Grid:
         self._cells = [
             [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
         ]
+        self._wrapped = [False] * self.rows
         self.cursor_row = 0
         self.cursor_col = 0
+        self.dirty = True
 
     def clear_line(self, row: int | None = None) -> None:
         """
@@ -279,6 +291,7 @@ class Grid:
         target = self.cursor_row if row is None else row
         if 0 <= target < self.rows:
             self._cells[target] = [self._blank() for _ in range(self.cols)]
+            self._wrapped[target] = False
 
     def clear_to_end_of_line(self) -> None:
         """
@@ -290,6 +303,7 @@ class Grid:
         """
         for col in range(self.cursor_col, self.cols):
             self._cells[self.cursor_row][col] = self._blank()
+        self._wrapped[self.cursor_row] = False
 
     def clear_to_end_of_screen(self) -> None:
         """
@@ -305,6 +319,7 @@ class Grid:
         self.clear_to_end_of_line()
         for row in range(self.cursor_row + 1, self.rows):
             self._cells[row] = [self._blank() for _ in range(self.cols)]
+            self._wrapped[row] = False
 
     def scroll_up(self, n: int = 1) -> None:
         """
@@ -323,13 +338,25 @@ class Grid:
         if n <= 0:
             return
         if n >= self.rows:
+            for r in range(self.rows):
+                self._scrollback.append((self._cells[r], self._wrapped[r]))
+            if len(self._scrollback) > self.max_scrollback:
+                self._scrollback = self._scrollback[-self.max_scrollback:]
             self._cells = [
                 [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
             ]
+            self._wrapped = [False] * self.rows
             return
+        for r in range(n):
+            self._scrollback.append((self._cells[r], self._wrapped[r]))
+        if len(self._scrollback) > self.max_scrollback:
+            self._scrollback = self._scrollback[-self.max_scrollback:]
         kept = self._cells[n:]
+        kept_wrapped = self._wrapped[n:]
         blanks = [[self._blank() for _ in range(self.cols)] for _ in range(n)]
+        blanks_wrapped = [False] * n
         self._cells = kept + blanks
+        self._wrapped = kept_wrapped + blanks_wrapped
 
     def scroll_down(self, n: int = 1) -> None:
         """
@@ -348,10 +375,14 @@ class Grid:
             self._cells = [
                 [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
             ]
+            self._wrapped = [False] * self.rows
             return
         kept = self._cells[: self.rows - n]
+        kept_wrapped = self._wrapped[: self.rows - n]
         blanks = [[self._blank() for _ in range(self.cols)] for _ in range(n)]
+        blanks_wrapped = [False] * n
         self._cells = blanks + kept
+        self._wrapped = blanks_wrapped + kept_wrapped
 
     def snapshot(self) -> Grid:
         """
@@ -366,8 +397,34 @@ class Grid:
         """
         clone = Grid(self.cols, self.rows, self.default_fg, self.default_bg)
         clone._cells = [[replace(cell) for cell in row] for row in self._cells]
+        clone._wrapped = list(self._wrapped)
+        clone._scrollback = [(list(row), wrap) for row, wrap in self._scrollback]
+        clone.max_scrollback = self.max_scrollback
         clone.cursor_row = self.cursor_row
         clone.cursor_col = self.cursor_col
+        clone.dirty = self.dirty
+        return clone
+
+    def render_with_cursor(self, cursor_fg: int, cursor_bg: int) -> Grid:
+        """
+        Return a copy of the grid with the cursor position highlighted.
+
+        Args:
+        - cursor_fg (`int`): RGB565 foreground for the cursor cell.
+        - cursor_bg (`int`): RGB565 background for the cursor cell.
+
+        Returns:
+        `Grid`: A grid copy with the cursor position highlighted.
+
+        """
+        clone = self.snapshot()
+        if clone._in_bounds(clone.cursor_row, clone.cursor_col):
+            cell = clone.cell_at(clone.cursor_row, clone.cursor_col)
+            clone._cells[clone.cursor_row][clone.cursor_col] = Cell(
+                char=cell.char,
+                fg=cursor_fg,
+                bg=cursor_bg,
+            )
         return clone
 
     def _row_runs(self, row: int, changed: list[bool]) -> list[CellRun]:
@@ -423,7 +480,8 @@ class Grid:
         `list[CellRun]`: The change runs, ordered by row then column.
 
         """
-        if prev.rows != self.rows or prev.cols != self.cols:
+        if self.dirty or prev.rows != self.rows or prev.cols != self.cols:
+            self.dirty = False
             return self._all_runs()
         runs: list[CellRun] = []
         for row in range(self.rows):
@@ -485,3 +543,153 @@ class Grid:
             and cell.fg == self.default_fg
             and cell.bg == self.default_bg
         )
+
+    def reflow(self, new_cols: int, new_rows: int) -> Grid:
+        """
+        Reflow text and cursor into a new geometry (cols x rows).
+
+        Reconstruct logical lines from scrollback and active screen rows,
+        respecting soft-wrapped line boundaries. Re-chunk the logical lines into
+        lines of width ``new_cols``, anchor the visible viewport to the bottom
+        of the reflowed content so the active prompt is preserved, and store any
+        overflowing upper rows into the new grid's scrollback.
+
+        Args:
+        - new_cols (`int`): Target column count (>= 1).
+        - new_rows (`int`): Target row count (>= 1).
+
+        Raises:
+        - `ValueError`: If ``new_cols`` or ``new_rows`` is less than 1.
+
+        Returns:
+        `Grid`: Newly allocated grid with reflowed content and clamped cursor.
+
+        """
+        if new_cols < 1 or new_rows < 1:
+            msg = f"grid dimensions must be >= 1, got cols={new_cols}, rows={new_rows}"
+            raise ValueError(msg)
+
+        new_grid = Grid(new_cols, new_rows, self.default_fg, self.default_bg)
+        new_grid.dirty = True
+        new_grid.max_scrollback = self.max_scrollback
+
+        all_rows: list[tuple[list[Cell], bool]] = list(self._scrollback)
+        for r in range(self.rows):
+            all_rows.append((self._cells[r], self._wrapped[r]))
+
+        # Keep rows up to max(cursor_row, last_non_blank_row)
+        last_active_row = self.cursor_row
+        for r in range(self.rows - 1, -1, -1):
+            if any(cell.char != " " or cell.bg != self.default_bg for cell in self._cells[r]):
+                last_active_row = max(last_active_row, r)
+                break
+
+        n_scroll = len(self._scrollback)
+        relevant_rows = all_rows[: n_scroll + last_active_row + 1]
+
+        logical_lines: list[list[Cell]] = []
+        target_cursor_r = n_scroll + self.cursor_row
+        target_cursor_c = self.cursor_col
+
+        cur_logical_line: list[Cell] = []
+        cursor_found = False
+        cursor_log_line = 0
+        cursor_log_offset = 0
+
+        for idx, (cells, wrapped) in enumerate(relevant_rows):
+            if idx == target_cursor_r:
+                cursor_log_line = len(logical_lines)
+                cursor_log_offset = len(cur_logical_line) + target_cursor_c
+                cursor_found = True
+
+            if not wrapped:
+                last_nb = len(cells)
+                while (
+                    last_nb > 0
+                    and cells[last_nb - 1].char == " "
+                    and cells[last_nb - 1].bg == self.default_bg
+                ):
+                    last_nb -= 1
+                cur_logical_line.extend(cells[:last_nb])
+                logical_lines.append(cur_logical_line)
+                cur_logical_line = []
+            else:
+                cur_logical_line.extend(cells)
+
+        if cur_logical_line or not logical_lines:
+            logical_lines.append(cur_logical_line)
+
+        if not cursor_found:
+            cursor_log_line = len(logical_lines) - 1
+            cursor_log_offset = len(logical_lines[-1])
+
+        new_all_rows: list[tuple[list[Cell], bool]] = []
+        new_cursor_row_global = 0
+        new_cursor_col = 0
+
+        for l_idx, line in enumerate(logical_lines):
+            if not line:
+                row_cells = [new_grid._blank() for _ in range(new_cols)]
+                if l_idx == cursor_log_line:
+                    new_cursor_row_global = len(new_all_rows)
+                    new_cursor_col = 0
+                new_all_rows.append((row_cells, False))
+                continue
+
+            cursor_placed = False
+            offset = 0
+            while offset < len(line):
+                chunk = line[offset : offset + new_cols]
+                is_soft_wrap = (offset + new_cols) < len(line)
+                row_cells = list(chunk)
+                if len(row_cells) < new_cols:
+                    row_cells.extend(
+                        [new_grid._blank() for _ in range(new_cols - len(row_cells))]
+                    )
+
+                if (
+                    not cursor_placed
+                    and l_idx == cursor_log_line
+                    and offset <= cursor_log_offset < offset + new_cols
+                ):
+                    new_cursor_row_global = len(new_all_rows)
+                    new_cursor_col = cursor_log_offset - offset
+                    cursor_placed = True
+
+                new_all_rows.append((row_cells, is_soft_wrap))
+                offset += new_cols
+
+            if not cursor_placed and l_idx == cursor_log_line:
+                new_cursor_row_global = len(new_all_rows) - 1
+                new_cursor_col = min(
+                    new_cols - 1,
+                    max(0, cursor_log_offset - (offset - new_cols)),
+                )
+
+        total_new_rows = len(new_all_rows)
+        if total_new_rows <= new_rows:
+            new_grid._scrollback = []
+            for r in range(total_new_rows):
+                new_grid._cells[r] = new_all_rows[r][0]
+                new_grid._wrapped[r] = new_all_rows[r][1]
+            for r in range(total_new_rows, new_rows):
+                new_grid._cells[r] = [new_grid._blank() for _ in range(new_cols)]
+                new_grid._wrapped[r] = False
+            new_grid.cursor_row = min(new_rows - 1, new_cursor_row_global)
+            new_grid.cursor_col = min(new_cols - 1, new_cursor_col)
+        else:
+            scrollback_count = total_new_rows - new_rows
+            raw_scrollback = new_all_rows[:scrollback_count]
+            if len(raw_scrollback) > new_grid.max_scrollback:
+                raw_scrollback = raw_scrollback[-new_grid.max_scrollback :]
+            new_grid._scrollback = raw_scrollback
+            visible_rows = new_all_rows[scrollback_count:]
+            for r in range(new_rows):
+                new_grid._cells[r] = visible_rows[r][0]
+                new_grid._wrapped[r] = visible_rows[r][1]
+            new_grid.cursor_row = max(
+                0, min(new_rows - 1, new_cursor_row_global - scrollback_count)
+            )
+            new_grid.cursor_col = min(new_cols - 1, new_cursor_col)
+
+        return new_grid

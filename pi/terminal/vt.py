@@ -98,6 +98,12 @@ class VTEmulator:
         self._params: list[str] = []
         self._param_digits: list[str] = []
 
+    def set_grid(self, grid: Grid) -> None:
+        """
+        Migrate emulator to a new grid (e.g. after reflow/resize) while preserving state.
+        """
+        self.grid = grid
+
     def feed(self, data: bytes) -> None:
         """
         Feed a chunk of shell output bytes, mutating the grid.
@@ -346,7 +352,7 @@ class VTEmulator:
 
     def _erase_display(self) -> None:
         """
-        Apply erase-in-display (``J``): mode 0 clears cursor to end, 2 clears all.
+        Apply erase-in-display (``J``): mode 0 clears cursor to end, 2/3 clears all.
 
         Returns:
         `None`: The grid is updated in place.
@@ -354,7 +360,7 @@ class VTEmulator:
         """
         params = self._int_params(default=0)
         mode = params[0] if params else 0
-        if mode == 2:
+        if mode in (2, 3):
             self.grid.clear()
         else:
             self.grid.clear_to_end_of_screen()

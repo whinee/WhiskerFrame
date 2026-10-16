@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""
+Cyberdeck Goodbye Splash Screen Hook.
+
+Draws the goodbye doodle image ('bai baiii' on poweroff/shutdown, 'brb' on reboot)
+centered over the theme background on the CYD display link over serial.
+Holds for ~4 seconds, then wipes the display to black before power cuts out.
+
+Safety & Operational Constraints:
+- Never delays shutdown more than <= 8.0 seconds total.
+- Fails silent (exit 0) on missing serial port, bus error, or timeout.
+- Only triggered on system shutdown/reboot targets, NOT on plain terminal restart.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+# Add project root and pi directory to sys.path
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+sys.path.insert(0, str(_REPO_ROOT / "pi"))
+
+# Add venv site-packages if present (ensures whiskerframe and pyserial are found)
+_VENV_LIB = _REPO_ROOT / "pi/.venv/lib"
+if _VENV_LIB.is_dir():
+    for _site_packages in _VENV_LIB.glob("python3.*/site-packages"):
+        sys.path.insert(0, str(_site_packages))
+_OPT_VENV_LIB = Path("/opt/cyd-display-link/pi/.venv/lib")
+if _OPT_VENV_LIB.is_dir():
+    for _site_packages in _OPT_VENV_LIB.glob("python3.*/site-packages"):
+        sys.path.insert(0, str(_site_packages))
+
+try:
+    from whiskerframe.models import DrawRect, DrawText
+    from whiskerframe.protocol import serialize
+    from whiskerframe.terminal import (
+        DISPLAY_HEIGHT,
+        DISPLAY_WIDTH,
+        DisplaySleep,
+        DrawImage,
+    )
+except ImportError:
+    # Graceful fallback if invoked in isolated environment
+    sys.exit(0)
+
+_DEFAULT_PORT: str = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+_FALLBACK_PORT: str = "/dev/ttyUSB0"
+_BAUD: int = 115200
+
+_THEME_BG: int = 0x18C5  # blurple background (#191a28)
+_TEXT_COLOR: int = 0xFD9C  # theme pink (#ffb3e6)
+_BLACK: int = 0x0000
+_IMAGE_SIZE: int = 128
+_CHUNK_ROWS: int = 4
+_HOLD_DURATION_S: float = 3.5
+_MAX_TOTAL_TIMEOUT_S: float = 7.5
+
+
+def resolve_serial_port() -> str:
+    """Find the configured or active CYD serial port."""
+    if Path(_DEFAULT_PORT).exists():
+        return _DEFAULT_PORT
+    if Path(_FALLBACK_PORT).exists():
+        return _FALLBACK_PORT
+    return _DEFAULT_PORT
+
+
+def _read_image_blob(rgb565_path: Path) -> bytes | None:
+    """Read and validate the 128x128 RGB565 blob."""
+    if not rgb565_path.exists():
+        return None
+    try:
+        blob = rgb565_path.read_bytes()
+    except OSError:
+        return None
+    expected_bytes = _IMAGE_SIZE * _IMAGE_SIZE * 2
+    return blob if len(blob) == expected_bytes else None
+
+
+def _stream_image_chunks(
+    ser: object,
+    blob: bytes,
+    start_time: float,
+    y_pos: int = 36,
+) -> None:
+    """Stream 128x128 image chunks centered horizontally on screen."""
+    x_pos = (DISPLAY_WIDTH - _IMAGE_SIZE) // 2
+    row_bytes = _IMAGE_SIZE * 2
+
+    for top in range(0, _IMAGE_SIZE, _CHUNK_ROWS):
+        if time.monotonic() - start_time > _MAX_TOTAL_TIMEOUT_S:
+            break
+        chunk_rows = min(_CHUNK_ROWS, _IMAGE_SIZE - top)
+        start_offset = top * row_bytes
+        end_offset = start_offset + (chunk_rows * row_bytes)
+        cmd = DrawImage(
+            x=x_pos,
+            y=y_pos + top,
+            w=_IMAGE_SIZE,
+            h=chunk_rows,
+            data=blob[start_offset:end_offset],
+        )
+        ser.write(serialize(cmd))  # type: ignore[attr-defined]
+    ser.flush()  # type: ignore[attr-defined]
+
+
+def send_goodbye(
+    port: str,
+    rgb565_path: Path,
+    mode: str = "shutdown",
+    hold_s: float = _HOLD_DURATION_S,
+) -> None:
+    """Stream background clear, centered doodle, subtitle, hold, and shutdown sleep."""
+    blob = _read_image_blob(rgb565_path)
+    if blob is None:
+        return
+
+    try:
+        import serial
+        ser = serial.Serial(port, baudrate=_BAUD, timeout=1.0, write_timeout=1.0)
+    except Exception:  # noqa: BLE001
+        return
+
+    start_time = time.monotonic()
+    try:
+        # 1. Full-screen blurple background clear
+        clear_frame = serialize(
+            DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_THEME_BG, filled=True),
+        )
+        ser.write(clear_frame)
+        ser.flush()
+
+        # 2. Render crisp subtitle text below icon ("brb :3" / "bai baiii!")
+        # Rendered immediately after background clear so operator gets instant feedback
+        # without waiting ~2.8s for 32KB image chunks to stream over 115200 baud serial.
+        subtitle = "brb :3" if mode == "reboot" else "bai baiii!"
+        text_cmd = serialize(
+            DrawText(
+                x=160,
+                y=184,
+                anchor="mm",
+                color=_TEXT_COLOR,
+                bg_color=_THEME_BG,
+                font_size=2,
+                text=subtitle,
+            )
+        )
+        ser.write(text_cmd)
+        ser.flush()
+
+        # 3. Stream centered doodle image chunks at y=36
+        _stream_image_chunks(ser, blob, start_time, y_pos=36)
+
+        # 4. Hold display for operator-specified duration
+        elapsed = time.monotonic() - start_time
+        remaining_hold = max(0.0, min(hold_s, _MAX_TOTAL_TIMEOUT_S - elapsed - 0.2))
+        if remaining_hold > 0:
+            time.sleep(remaining_hold)
+
+        # 5. On shutdown: wipe black and issue DisplaySleep opcode
+        if mode == "shutdown":
+            black_frame = serialize(
+                DrawRect(x=0, y=0, w=DISPLAY_WIDTH, h=DISPLAY_HEIGHT, color=_BLACK, filled=True),
+            )
+            ser.write(black_frame)
+            ser.write(serialize(DisplaySleep()))
+            ser.flush()
+            # Display shutdown synchronization: allow coprocessor UART FIFO and
+            # display controller to complete DISPOFF/SLPIN before port close.
+            time.sleep(0.15)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    finally:
+        try:
+            ser.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Cyberdeck Goodbye Screen Hook")
+    parser.add_argument(
+        "--mode",
+        choices=["shutdown", "reboot", "auto"],
+        default="auto",
+        help="Target action variant",
+    )
+    parser.add_argument(
+        "--port",
+        default="",
+        help="Serial port for CYD display link",
+    )
+    parser.add_argument(
+        "--hold",
+        type=float,
+        default=_HOLD_DURATION_S,
+        help="Hold duration in seconds before black wipe",
+    )
+    args = parser.parse_args()
+
+    # Resolve mode: default to shutdown unless reboot specified or detected
+    mode = args.mode
+    if mode == "auto":
+        try:
+            import subprocess
+
+            proc = subprocess.run(
+                ["systemctl", "list-jobs"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            mode = "reboot" if "reboot.target" in proc.stdout else "shutdown"
+        except Exception:
+            mode = "shutdown"
+
+    image_name = "goodbye-reboot.rgb565" if mode == "reboot" else "goodbye-shutdown.rgb565"
+    rgb565_path = _REPO_ROOT / "assets/images" / image_name
+    if not rgb565_path.is_file():
+        alt_path = Path("/opt/cyd-display-link/assets/images") / image_name
+        if alt_path.is_file():
+            rgb565_path = alt_path
+
+    port = args.port or resolve_serial_port()
+
+    # Fail silent on execution
+    try:
+        send_goodbye(port, rgb565_path, mode=mode, hold_s=args.hold)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

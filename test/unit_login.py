@@ -33,9 +33,13 @@ from terminal.login import (
     SubmitEvent,
     authenticate,
 )
+from terminal.login_view import render_login
+from terminal.theme import load_theme
 
 _UP: int = 0xB5
 _DOWN: int = 0xB6
+_LEFT: int = 0xB4
+_ESC: int = 0x1B
 _ENTER: int = 0x0D
 _BACKSPACE: int = 0x08
 
@@ -109,6 +113,60 @@ def check_backspace() -> None:
     assert event.password == "ab"  # noqa: S105
 
 
+def check_left_arrow_navigation() -> None:
+    """
+    Assert pressing Left arrow or Esc from password screen resets to user select.
+
+    Raises:
+    - `AssertionError`: If pressing Left or Esc fails to return to user select.
+
+    Returns:
+    `None`: Returns nothing on success.
+
+    """
+    state = LoginState(users=["root", "neko"])
+    state.feed_key(_ENTER)
+    assert state.screen is LoginScreen.PASSWORD
+    for ch in b"secret":
+        state.feed_key(ch)
+    assert state.masked() == "******"
+
+    # Pressing Left arrow resets to USER_SELECT and clears password
+    assert state.feed_key(_LEFT) is None
+    assert state.screen is LoginScreen.USER_SELECT
+    assert state.masked() == ""
+
+    # Re-enter password screen and test Esc key
+    state.feed_key(_ENTER)
+    assert state.screen is LoginScreen.PASSWORD
+    for ch in b"xyz":
+        state.feed_key(ch)
+    assert state.feed_key(_ESC) is None
+    assert state.screen is LoginScreen.USER_SELECT
+    assert state.masked() == ""
+
+
+def check_clear_password() -> None:
+    """
+    Assert clear_password empties the buffer while staying on the current screen.
+
+    Raises:
+    - `AssertionError`: If password is not cleared or screen changes.
+
+    Returns:
+    `None`: Returns nothing on success.
+
+    """
+    state = LoginState(users=["neko"])
+    state.feed_key(_ENTER)
+    for ch in b"secret":
+        state.feed_key(ch)
+    assert state.masked() == "******"
+    state.clear_password()
+    assert state.masked() == ""
+    assert state.screen is LoginScreen.PASSWORD
+
+
 def check_empty_users_rejected() -> None:
     """
     Assert constructing with an empty user list raises.
@@ -153,6 +211,27 @@ def check_authenticate_guard() -> None:
     raise AssertionError(msg)
 
 
+def check_demo_mode_hint() -> None:
+    """Assert demo_mode renders a login hint at the bottom of the screen."""
+    state = LoginState(users=["root", "neko", "guest"])
+    theme = load_theme(None)
+    # With demo_mode=True
+    grid_demo = render_login(state, theme, cols=26, rows=15, demo_mode=True)
+    bottom_line = "".join(grid_demo.cell_at(14, col).char for col in range(26)).rstrip()
+    assert (
+        "guest / guest" in bottom_line
+    ), f"expected hint on bottom line, got {bottom_line!r}"
+
+    # With demo_mode=False
+    grid_nodemo = render_login(state, theme, cols=26, rows=15, demo_mode=False)
+    bottom_line_no = "".join(
+        grid_nodemo.cell_at(14, col).char for col in range(26)
+    ).rstrip()
+    assert (
+        "guest / guest" not in bottom_line_no
+    ), "hint should not appear when demo_mode=False"
+
+
 def main() -> None:
     """
     Run the login checks and report the outcome.
@@ -165,8 +244,11 @@ def main() -> None:
         check_user_navigation()
         check_password_masking()
         check_backspace()
+        check_left_arrow_navigation()
+        check_clear_password()
         check_empty_users_rejected()
         check_authenticate_guard()
+        check_demo_mode_hint()
     except AssertionError as exc:
         print(f"FAIL: {exc}")
         sys.exit(1)
