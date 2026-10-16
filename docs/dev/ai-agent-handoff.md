@@ -843,6 +843,84 @@ RESULT: [2026-10-15T00:30Z] Demo Polish & Ergonomics Suite (WS-1 .. WS-7, WS-9) 
 8. **WS-9 (Repository Hygiene & Guard Validation):** PreToolUse policy guard `spec-interview-guard` verified (blocks writes to `0.md` with exit 2, allows safe reads with exit 0); `assets/images/cess/SHA256SUMS` verified OK; git status clean of unexpected binaries or secret leaks.
 9. **Documentation Triad Synced:** Logged `DEC-W29` in `docs/dev/ai-decisions.md`, recorded entries in `docs/dev/changelog.md`, and updated `docs/specifications/tasks.md` with TSK-11 through TSK-15.
 
+---
+
+## 2026-10-15 06:15 UTC — Lead Orchestrator — Emergency Halt & Agent Handoff
+
+### (a) What I have done
+- Built and verified display low-power sleep opcode `0x06` (`kOpcodeSleep` / `DisplaySleep`) in CYD coprocessor firmware (`firmware/cyd_display_link/frame.h`, `render.h`, `main.cpp`).
+- Generated 8x12 monospace bitmap font (`font_8x12.h` via `scripts/generate_font_8x12.py`) for intermediate 40x20 terminal geometry and implemented `tft.drawBitmap` rendering in `render.h`.
+- Compiled CYD firmware clean using PlatformIO (`uvx platformio run -d firmware/cyd_display_link`, RAM 7.5%, Flash 23.0%, exit code 0).
+- Redesigned and refactored `pi/bin/goodbye_hook` hybrid splash rendering: full-screen blurple background clear (`0x18C5`), centered 128x128 doodle icon at (96, 36), native `DrawText` subtitle at (160, 184) ("brb :3" on reboot, "bai baiii!" on shutdown), hold $\ge 3.0$s, and black clear + `DisplaySleep` on shutdown.
+- Updated `scripts/generate_goodbye.py` and regenerated clean 128x128 doodle splash blobs without baked-in text (32,768 bytes).
+- Authored dedicated systemd units `pi/terminal/cyberdeck-goodbye-reboot.service` and `pi/terminal/cyberdeck-goodbye-shutdown.service` with `Before=shutdown.target umount.target final.target` to prevent filesystem unmounting before Python execution.
+- Updated `test/test_goodbye_hook.py` covering reboot and shutdown execution paths (7/7 tests passed).
+- Committed all changes to local branch `agent/2026-10-07-initial` as commit `f8c7745` (`git status` clean, 0 secret leaks).
+
+### (b) The problem the developer is facing right now
+- Operator triggered immediate emergency halt.
+- Pending physical deployments to Pi Zero 2W:
+  1. Updated `goodbye_hook` and split systemd units (`cyberdeck-goodbye-reboot.service`, `cyberdeck-goodbye-shutdown.service`) need deployment to `/opt/cyd-display-link/pi/bin/` and `/etc/systemd/system/`.
+  2. Physical ESP32 firmware flashing is parked per safety SOP (requires stopping `terminal.service`, backing up flash via `esptool read_flash`, flashing `.pio/build/esp32dev/firmware.bin`, and monitoring 20s of boot output).
+  3. `whiskerframe/metrics.py` and `pi/terminal/bridge.py` require wiring font 5 (8x12) into `RESIZE_SIZES` to make 40x20 geometry accessible via `Fn + Backspace`.
+
+### (c) What still needs to be done (MOST IMPORTANT)
+- [ ] T1: Deploy Refined Goodbye Splash & Systemd Units to Pi Zero 2W:
+  - Copy `pi/bin/goodbye_hook` to `/opt/cyd-display-link/pi/bin/goodbye_hook` on the Pi Zero 2W.
+  - Copy `pi/terminal/cyberdeck-goodbye-reboot.service` and `pi/terminal/cyberdeck-goodbye-shutdown.service` to `/etc/systemd/system/` on the Pi.
+  - Run `sudo systemctl daemon-reload` and enable both units (`sudo systemctl enable cyberdeck-goodbye-reboot.service cyberdeck-goodbye-shutdown.service`).
+  - Acceptance criteria: Executing `/opt/cyd-display-link/pi/.venv/bin/python3 /opt/cyd-display-link/pi/bin/goodbye_hook --mode reboot` clears blurple, draws centered doodle, renders "brb :3", and completes without error.
+- [ ] T2: Safely Flash Updated CYD Firmware to ESP32 Coprocessor:
+  - Stop terminal service: `sudo systemctl stop terminal.service`.
+  - Back up current ESP32 flash via Pi serial using `esptool --no-stub -p /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 read_flash 0 0x400000 /mnt/250GB-SSD/cyd_backup.bin`. Checksum the backup.
+  - Flash compiled `.pio/build/esp32dev/firmware.bin` via `esptool --no-stub`.
+  - Monitor 20 seconds of boot output to ensure no panic or boot loop; verify CYD screen powers on cleanly and restart `terminal.service`.
+  - Acceptance criteria: CYD receives opcode `0x06` on shutdown, cuts backlight GPIO 21, and enters display sleep; wakes immediately on next valid frame.
+- [ ] T3: Wire Intermediate 40x20 Font Geometry (font 5) in Terminal Bridge:
+  - In `whiskerframe/metrics.py`, add `FONT_METRICS[5] = FontMetrics(cell_width=8, cell_height=12, line_advance=12)`.
+  - In `pi/terminal/bridge.py`, update `RESIZE_SIZES` from `(1, 2, 3)` to `(1, 5, 2, 3)` so `Fn + Backspace` cycles 53x30 -> 40x20 -> 26x15 -> 17x10.
+  - Acceptance criteria: Pressing `Fn + Backspace` cycles to a crisp 40x20 grid with 8x12 character cells without graphical corruption.
+- [ ] T4: Synchronize Documentation Triad & Decision Records:
+  - Record `DEC-W31` in `docs/dev/ai-decisions.md` (intermediate 8x12 font, sleep opcode `0x06`, blurple hybrid splash layout, systemd ordering fix).
+  - Record `TSK-17` in `docs/specifications/tasks.md`.
+  - Update `docs/dev/changelog.md` with commit `f8c7745` changes.
+  - Acceptance criteria: Documentation triad files accurately reflect commit `f8c7745`.
+- [ ] T5: Operator Morning Pre-Flight & Demonstration Execution:
+  - Execute steps 1 through 9 from `docs/dev/ai-recovery/2026-10-15.md` Section 6.
+
+### (d) What I told the user to do next
+1. Complete Morning Checklist in `docs/dev/ai-recovery/2026-10-15.md` Section 6 before taking deck to venue.
+2. Push commit `f8c7745` via `~/.config/agent-policy/bin/agent-push`.
+3. If flashing ESP32 coprocessor at venue/bench, execute T2 under attended safety SOP.
+4. Rotate temporary recovery credentials (`u472bmt`) for `neko` and `root`.
+
+---
+
+## 2026-10-16 00:00 UTC — Lead Orchestrator — Full Throttle Pre-Demo Hardening & Resilience Wave
+
+### Q-016 | 2026-10-16T00:00Z | ANSWERED
+Blocked: None. Emergency halt lifted; full throttle resumption authorized.
+Options:
+  - Resume full throttle with parallel workstreams (WS-A through WS-J), single-writer lanes, link safety guards, and firmware flashing authorized under attended mode.
+Applies to: All workstreams (WS-A through WS-J), repository sync, firmware flashing, reliability testing, offline library, and demo polish.
+Answer:
+RESUME, FULL THROTTLE. The emergency HALT is lifted. This message overrides the earlier "verify and freeze" resume prompt, the schedule/time caps, and the worker cap.
+Reply sent: Acknowledged. Resumed full throttle execution under standing safety rails.
+
+INTENT: [2026-10-16T00:00Z] Orchestration Wave 2 — Pre-Demo Hardening & Resilience:
+1. WS-A: Commit handoff updates, verify repo hygiene (clean, no secrets, no 0.md, no derived Cess art), push via agent-push.
+2. WS-B: Read-only Pi boot & system survey (uptime, throttled, temp, RAM, failed units, journal, battery).
+3. WS-C: Verify firmware flashing state; execute attended backup and flash of ESP32 sleep opcode & 8x12 font firmware if unapplied.
+4. WS-D: Reliability fault-injection tests (guest abuse suite, terminal soak, logout/login, Ctrl latch state machine, bridge restart).
+5. WS-E: Author docs/dev/demo-day.md (3-min script, cheat sheet, failure playbook, pre-leave checklist).
+6. WS-F: Thermal-supervised backup transfer of backimg.zst and post-reboot final SD image.
+7. WS-G: Confirm offline library components, add small Kiwix ZIMs (<5GB), polish wiki CLI.
+8. WS-H: Complete spec split, draft REQs (v0/v1/v2), update followups & contradictions.
+9. WS-I: Review Wi-Fi/network docs, prepare NetBird role, script TSK-05 dry-run with rescue timer.
+10. WS-J: Validate spec-interview-guard, run gitleaks over outgoing range.
+
+
+
 
 
 
