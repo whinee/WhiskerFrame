@@ -6,14 +6,14 @@ exact live hardware state, and the conventions you MUST follow.
 
 ## 0. TL;DR / current live state
 
-- **Session Context:** Lead Orchestrator: Overnight Full-Spec Implementation & v0.1.0 Release Mission.
+- **Session Context:** Lead Orchestrator: Overnight Full-Spec Implementation & v0.1.0 Release Mission (Emergency Controlled Handoff).
 - **Target:** Raspberry Pi Zero 2W (`pi-midori-neko`, `root@10.0.0.212`, key auth). Uptime verified, cold boot healthy.
 - **Hardware State:** Pi up, persistent journal active, terminal.service running.
-- **Current Task:** Full Master Specification Implementation, Comprehensive Documentation & Testing, Release-Gated CI/CD, v0.1.0 Release Validation.
-- **Last RESULT:** Orca orchestration initialized (run `run_e349d2a1fdf0`); 227 pytest unit/property tests green; 13/13 ATP acceptance suites passing (100.0%); Documentation Triad synchronized (DEC-W39, TSK-24..26, changelog v0.1.0).
+- **Current Task:** Controlled Mission Handoff & State Preservation. All 11 Orca orchestration tasks completed; release candidates verified.
+- **Last RESULT:** [2026-10-16T13:00Z] Emergency Controlled Handoff: All 11 Orca tasks completed (`run_e349d2a1fdf0`); 238 unit/property tests green; 5/5 stress/endurance tests green; E2E user journey green; 10/10 CI/CD release pipeline gates green; 83/83 master requirements reconciled in matrix with 100% verified path integrity; 12-domain manual suite authored (DEC-W40); all workers safely settled and released.
 - **Hard Rules Active:** No deliberate reboot/poweroff without rescue timer; sealed deck invariant; credentials redacted; explicit paths for git; Safe Autocommit Policy enforced.
-- **Open Blockers:** None.
-- **Next Action:** Complete Testing & QA (Task 2), Release-Gated CI/CD Workflows (Task 4), and v0.1.0 Release Candidate Validation (Task 5).
+- **Open Blockers:** None (awaiting operator authorization for push and release tag).
+- **Next Action:** Operator reviews 23 commits on `agent/2026-10-07-initial`, authorizes push via `agent-push`, tags `v0.1.0` to trigger publication workflow.
 
 ## 1. What this project is
 
@@ -1007,6 +1007,14 @@ INTENT: [2026-10-16T11:20Z] Orchestration Wave — Full-Spec Implementation, CI/
 5. CI/CD: Release-gated GitHub Actions workflows.
 6. Packaging & Release Candidate Validation: Clean builds, SHA256SUMS, and release notes.
 
+RESULT: [2026-10-16T11:55Z] Orchestration Wave Completed:
+1. Decomposed into tasks task_5fb33b772686, task_2df958888dc4, task_00a8f09036f5, task_a0c62d65bc1a, task_ef5fc254a45a.
+2. Core Implementation verified (REQ-PWR-01, REQ-ENV-04, REQ-INP-08, REQ-INP-07, REQ-ENV-03, REQ-HW-07).
+3. 227 tests, 16 security checks, 13 ATP plans green.
+4. Documentation Triad synced (DEC-W39, TSK-24..26, changelog v0.1.0).
+5. CI/CD workflows (.github/workflows/ci.yml, release.yml) established.
+6. Clean wheel and sdist built, firmware SHA256 checksums verified.
+
 ---
 
 ## 2026-10-16 11:55 UTC — Lead Orchestrator — v0.1.0 Release Candidate Completion & Verification
@@ -1054,3 +1062,83 @@ None. All 5 Orca orchestration tasks are marked COMPLETED. All release gates pas
 
 ### (d) What I told the user to do next
 Presented complete evidence-based release report with artifact SHA256 checksums, test metrics, and release readiness.
+
+INTENT: [2026-10-16T12:08Z] Remediation Fan-Out Wave — Traceability Audit, 12-Domain Manuals, Stress/Endurance/E2E Testing, CI/CD Verification:
+1. Dispatch parallel Orca tasks for requirement reconciliation matrix, REQ-STORAGE-05 network-gated snapshot sync, 12-domain manual suite, stress/endurance testing, automated E2E lifecycle journey, and CI/CD pipeline verification harness.
+2. Supervise worker lifecycles, monitor progress via heartbeats and messages, and integrate results.
+3. Validate 100% artifact path integrity across all 83 master requirements.
+4. Verify all tests pass, all pipeline gates pass, and all commits adhere to Safe Autocommit policy.
+
+RESULT: [2026-10-16T12:50Z] Remediation Fan-Out Wave Completed:
+1. All 6 remediation tasks completed and settled:
+   - task_2c3f29327c53 (req-matrix): Reconciled all 83 master requirements in docs/specifications/requirement-reconciliation-matrix.md with 100% path verification in scripts/verify_requirements_traceability.py (commit 33534cc).
+   - task_53657c050a44 (backup-sync): REQ-STORAGE-05 cellular gating implemented in scripts/backup-sync.sh with 5/5 unit tests in test/test_backup_sync.py (commit 14b6778).
+   - task_726effe3a449 (manuals-12): Authored master README, operator manual, developer manual, and 12 domain chapters in docs/manual/, documented DEC-W40 in docs/dev/ai-decisions.md (commit 1830864).
+   - task_47861d28ad93 (stress-suite): Implemented and passed 5/5 tests in scripts/reliability/test_stress_endurance.py (commit c09fcdf).
+   - task_95300b8b878f (e2e-journey): Implemented and passed automated operator session lifecycle in test/test_e2e_user_journey.py (commit e7f8b8f).
+   - task_5fd64bf25dc9 (cicd-verify): Implemented and passed 10/10 pipeline gates in scripts/verify_cicd_pipeline.py (commit b23a975).
+2. All 11 tasks in Orca Run run_e349d2a1fdf0 verified completed.
+3. 238 unit/property tests, 5 stress tests, E2E journey, and 10 CI/CD gates 100% green.
+
+---
+
+## 2026-10-16 13:00 UTC — Lead Orchestrator — Emergency Controlled Handoff & Mission Suspension
+
+### (a) What I have done
+- Executed emergency controlled handoff under operator directive.
+- Stopped dispatching all new tasks, workers, tests, deployments, commits, and release actions.
+- Inspected the active Orca task DAG and all workers in Run `run_e349d2a1fdf0`:
+  - 11 of 11 orchestration tasks in terminal status `completed`:
+    1. `task_5fb33b772686` (`core-impl`): Three-tier power profiles (`pi/bin/power-profile`), sensory audio presets and overload clamp (`pi/bin/profile`), alert engine (`whiskerframe/alerts.py`), high-contrast theme (`assets/themes/mono-high-contrast.json`), firmware host watchdog (`firmware/cyd_display_link/main.cpp`). Status: COMPLETED.
+    2. `task_2df958888dc4` (`testing-qa`): Testing pyramid execution, 227 unit tests, 16 security checks, 13 ATP plans. Status: COMPLETED.
+    3. `task_00a8f09036f5` (`system-docs`): Documentation triad sync (DEC-W39, TSK-24..26, changelog v0.1.0), architecture updates, operator field guide. Status: COMPLETED.
+    4. `task_a0c62d65bc1a` (`cicd-pipeline`): GitHub Actions workflows `.github/workflows/ci.yml` and `release.yml`. Status: COMPLETED.
+    5. `task_ef5fc254a45a` (`release-pkg`): Build packaging (sdist, wheel), firmware SHA256 manifest. Status: COMPLETED.
+    6. `task_2c3f29327c53` (`req-matrix`): 83-requirement reconciliation matrix (`docs/specifications/requirement-reconciliation-matrix.md`) and static validator (`scripts/verify_requirements_traceability.py`). Status: COMPLETED. Worker: Dispatch `ctx_37b1053cef9b`.
+    7. `task_53657c050a44` (`backup-sync`): REQ-STORAGE-05 network-gated snapshot sync in `scripts/backup-sync.sh` and `test/test_backup_sync.py`. Status: COMPLETED.
+    8. `task_726effe3a449` (`manuals-12`): 12-domain manual suite in `docs/manual/`, operator and developer manuals, DEC-W40 in `docs/dev/ai-decisions.md`. Status: COMPLETED. Worker: Dispatch `ctx_079aab272798`.
+    9. `task_47861d28ad93` (`stress-suite`): Sustained stress & endurance suite in `scripts/reliability/test_stress_endurance.py` (5/5 green). Status: COMPLETED.
+    10. `task_95300b8b878f` (`e2e-journey`): Automated end-to-end user journey in `test/test_e2e_user_journey.py` (green). Status: COMPLETED.
+    11. `task_5fd64bf25dc9` (`cicd-verify`): Rigorous CI/CD verification harness in `scripts/verify_cicd_pipeline.py` (10/10 gates green). Status: COMPLETED.
+  - Active worker lifecycles safely settled and released using Orca documented controls:
+    - Worker Dispatch `ctx_079aab272798` (Task `task_726effe3a449`): Settled (`workerState: succeeded`, `dispatchStatus: completed`). Released/fenced (`alreadySettled: true`, `processAction: none`). Terminal retained (`user_takeover`).
+    - Worker Dispatch `ctx_37b1053cef9b` (Task `task_2c3f29327c53`): Settled (`workerState: succeeded`, `dispatchStatus: completed`). Released/fenced (`alreadySettled: true`, `processAction: none`). Terminal retained (`user_takeover`).
+    - Run mailbox checked and acknowledged: 0 pending messages, 0 unacknowledged deliveries.
+    - Zero active worker processes running; no unintended background execution.
+- Verified working tree and branch state:
+  - Branch: `agent/2026-10-07-initial`
+  - Upstream tracking: Ahead of `origin/agent/2026-10-07-initial` by 23 commits. Zero remote pushes performed.
+  - Working tree: clean. All changes preserved across atomic commits (`14b6778`, `c09fcdf`, `e7f8b8f`, `b23a975`, `1830864`, `33534cc`).
+- Verified test results and quality gates:
+  - Unit/property tests: 238 passing tests (`pytest`)
+  - Stress & endurance tests: 5/5 passing tests (`scripts/reliability/test_stress_endurance.py`)
+  - End-to-end user journey: passing (`test/test_e2e_user_journey.py`)
+  - CI/CD release pipeline verification: 10/10 gates passing (`scripts/verify_cicd_pipeline.py`)
+  - Security audit: 16/16 checks passing (`scripts/verify_security_audit.py`)
+  - Master acceptance suite: 13/13 ATP plans passing (`scripts/run_all_acceptance_tests.py`)
+  - Traceability and path integrity: 100% across all 83 master requirements (`scripts/verify_requirements_traceability.py`)
+
+### (b) The problem the developer is facing right now
+Mission execution is suspended under operator directive "EMERGENCY CONTROLLED HANDOFF".
+No technical blockers, bugs, or test failures exist.
+Remote push (`agent-push`), tag creation (`v0.1.0`), and GitHub release publication remain strictly gated on explicit operator approval per policy.
+
+### (c) What still needs to be done (MOST IMPORTANT)
+- [ ] T1: Operator review and authorization for local branch push:
+  - Review 23 local commits on `agent/2026-10-07-initial`.
+  - Authorize and execute push via `~/.config/agent-policy/bin/agent-push`.
+- [ ] T2: Operator authorization for release tagging:
+  - Authorize creation of annotated git tag `v0.1.0` on commit `33534cc` (or latest commit).
+- [ ] T3: Trigger and monitor GitHub Actions release workflow:
+  - Push tag `v0.1.0` to trigger `.github/workflows/release.yml`.
+  - Verify release build artifacts, checksums, and GitHub release publication.
+- [ ] T4: Physical target deck hardware validation:
+  - Connect to Pi Zero 2W (`pi-midori-neko`, `10.0.0.212`) when physical deck is assembled.
+  - Perform live hardware smoke test on physical display and CardKB keyboard.
+- [ ] T5: Post-release PR and branch merge:
+  - Open pull request from `agent/2026-10-07-initial` to `main` and merge after CI passes.
+
+### (d) What I told the user to do next
+1. Execution is cleanly stopped; all workers, tasks, and state are preserved without resets or discards.
+2. Review local git log (`git log -n 10 --oneline`) and verification results.
+3. When ready to proceed with release, provide operator authorization for `agent-push` and `v0.1.0` release tag.
