@@ -124,6 +124,7 @@ class TerminalGeometry(NamedTuple):
 
         Returns:
         `TerminalGeometry`: The constrained geometry for the terminal viewport.
+
         """
         clamped_rows = max(1, self.rows - max(0, status_bar_rows))
         return TerminalGeometry(
@@ -147,6 +148,7 @@ class TerminalGeometry(NamedTuple):
 
         Returns:
         `tuple[int, int]`: (start_row, height) on the character grid.
+
         """
         h = max(0, min(rows, self.rows))
         if position.lower() == "bottom":
@@ -167,6 +169,7 @@ class TerminalGeometry(NamedTuple):
 
         Returns:
         `tuple[int, int]`: (start_row, height) on the character grid.
+
         """
         sb_h = max(0, min(status_bar_rows, self.rows))
         vp_h = max(1, self.rows - sb_h)
