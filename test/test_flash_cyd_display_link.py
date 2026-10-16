@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from collections.abc import Generator
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS_DIR = _REPO_ROOT / "scripts"
@@ -28,6 +31,21 @@ from flash_cyd_display_link import (  # noqa: E402
     resolve_serial_port,
     verify_checksums,
 )
+
+
+@pytest.fixture(autouse=True)
+def _ensure_factory_backup() -> Generator[None, None, None]:
+    """Ensure a valid 4 MiB backup file exists for dry-run tests if absent."""
+    backup_file = _REPO_ROOT / "cyd_factory_backup.bin"
+    created = False
+    if not backup_file.exists():
+        backup_file.write_bytes(b"\x00" * 4194304)
+        created = True
+    try:
+        yield
+    finally:
+        if created and backup_file.exists():
+            backup_file.unlink()
 
 
 def test_verify_checksums_valid(tmp_path: Path) -> None:
