@@ -59,7 +59,28 @@ for u_home in "/root" "/home/neko"; do
     fi
 done
 
-# 3. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
+# 3. Guest PAM login autostart & CLI helpers
+echo "Configuring guest demo autostart in /etc/profile.d/guest-demo.sh ..."
+cat << 'EOF' > /etc/profile.d/guest-demo.sh
+if [ "${USER:-$(id -un 2>/dev/null)}" = "guest" ] && [ -n "$PS1" ]; then
+    if [ -x /usr/local/bin/wf ]; then
+        /usr/local/bin/wf demo
+    elif [ -x /usr/local/bin/demo ]; then
+        /usr/local/bin/demo
+    elif [ -x /opt/cyd-display-link/pi/bin/demo ]; then
+        /opt/cyd-display-link/pi/bin/demo
+    fi
+fi
+EOF
+chmod 0755 /etc/profile.d/guest-demo.sh
+
+# Symlink CLI utilities to /usr/local/bin
+[ -f "${HERE}/../bin/wf" ] && ln -sf "${HERE}/../bin/wf" /usr/local/bin/wf || true
+[ -f "${HERE}/../bin/workspace" ] && ln -sf "${HERE}/../bin/workspace" /usr/local/bin/workspace || true
+[ -f "${HERE}/../bin/demo" ] && ln -sf "${HERE}/../bin/demo" /usr/local/bin/demo || true
+[ -f "${HERE}/../bin/wifi" ] && ln -sf "${HERE}/../bin/wifi" /usr/local/bin/wifi || true
+
+# 4. Reload, enable, (re)start. `enable --now` and `restart` are both idempotent.
 echo "Reloading systemd and starting the service ..."
 systemctl daemon-reload
 systemctl enable terminal.service

@@ -41,6 +41,12 @@ DISPLAY GEOMETRY CHORD:
                 Font 2: 26x15 (default readable)
                 Font 3: 17x10 (large type)
 
+WORKSPACE NAVIGATION:
+  Fn+1 .. Fn+4  Direct switch to workspace 1..4
+  Fn+n          Switch to next workspace
+  Fn+p          Switch to previous workspace
+  workspace ls  CLI status and workspace list
+
 NAVIGATION & SPECIAL:
   Up / Down     History navigation / cursor
   Left / Right  Line editing / cursor move
