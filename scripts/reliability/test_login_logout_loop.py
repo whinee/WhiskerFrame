@@ -75,6 +75,31 @@ def simulate_guest_cleanup(guest_home: Path, skel_dir: Path, user: str = "guest"
     os.chmod(guest_home, 0o700)
 
 
+def simulate_guest_pam_open(guest_home: Path, skel_dir: Path, user: str = "guest") -> None:
+    """
+    Simulate the guest-session-cleanup.sh hook executed by pam_exec on session open.
+
+    Ensures skel is present and injects auto-start demo in .bashrc.
+    """
+    if user != "guest":
+        return
+
+    guest_home.mkdir(parents=True, exist_ok=True)
+    bashrc = guest_home / ".bashrc"
+    if not bashrc.exists() and skel_dir.exists():
+        for skel_item in skel_dir.iterdir():
+            dst = guest_home / skel_item.name
+            if skel_item.is_dir():
+                shutil.copytree(skel_item, dst)
+            else:
+                shutil.copy2(skel_item, dst)
+
+    if bashrc.exists() and "wf demo" not in bashrc.read_text():
+        with bashrc.open("a") as f:
+            f.write('[ -n "$PS1" ] && { [ -x /usr/local/bin/wf ] && /usr/local/bin/wf demo || ([ -x /usr/local/bin/demo ] && /usr/local/bin/demo); }\n')
+    os.chmod(guest_home, 0o700)
+
+
 def count_open_pty_fds() -> int:
     """Count currently open file descriptors in the process that point to ptys."""
     fd_dir = Path("/proc/self/fd")
@@ -144,6 +169,16 @@ class TestLoginLogoutLoop(unittest.TestCase):
         self.assertTrue((self.guest_home / ".bashrc").exists())
         self.assertTrue((self.guest_home / ".profile").exists())
         self.assertEqual(oct(self.guest_home.stat().st_mode & 0o777), oct(0o700))
+
+    def test_guest_pam_login_autostarts_demo(self) -> None:
+        """Guest PAM open_session ensures demo/wf demo autostarts in .bashrc."""
+        # Clean session start
+        simulate_guest_cleanup(self.guest_home, self.skel_dir, "guest")
+        # Trigger PAM session open
+        simulate_guest_pam_open(self.guest_home, self.skel_dir, "guest")
+        bashrc_content = (self.guest_home / ".bashrc").read_text()
+        self.assertIn("wf demo", bashrc_content)
+        self.assertIn("demo", bashrc_content)
 
     @patch("terminal.bridge.authenticate")
     @patch("terminal.bridge._tiocswinsz")

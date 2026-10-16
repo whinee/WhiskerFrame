@@ -139,6 +139,29 @@
     group: root
     mode: "0755"
 
+- name: Deploy wf unified cyberdeck CLI symlink
+  ansible.builtin.file:
+    src: /opt/cyd-display-link/pi/bin/wf
+    dest: /usr/local/bin/wf
+    state: link
+    force: true
+
+- name: Deploy guest demo autostart profile script
+  ansible.builtin.copy:
+    dest: /etc/profile.d/guest-demo.sh
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      # Auto-start demo upon guest PAM login
+      if [ "${USER:-$(id -un 2>/dev/null)}" = "{{ guest_user }}" ] && [ -n "$PS1" ]; then
+          if [ -x /usr/local/bin/wf ]; then
+              /usr/local/bin/wf demo
+          elif [ -x /usr/local/bin/demo ]; then
+              /usr/local/bin/demo
+          fi
+      fi
+
 - name: Deploy guest containment test suite
   ansible.builtin.template:
     src: test-guest-containment.sh.j2
