@@ -102,6 +102,8 @@ class TestWhiskerFrameCLI(unittest.TestCase):
             ["-h"],
             ["help", "man"],
             ["help", "wifi"],
+            ["help", "power"],
+            ["help", "profile"],
             ["help", "demo"],
             ["help", "terminal"],
             ["help", "workspace"],
@@ -121,13 +123,34 @@ class TestWhiskerFrameCLI(unittest.TestCase):
     # --- 2. Offline Manual (wf man) Tests ------------------------------------
 
     def test_wf_man_index_bounded(self) -> None:
-        """'wf man' index lists all 5 required topics strictly <= 53 cols."""
+        """'wf man' index lists all required topics strictly <= 53 cols."""
         code, lines = self._run_wf(["man"])
         self.assertEqual(code, 0)
         self._assert_bounded_53_cols(lines, "wf man index")
         joined = "\n".join(lines)
-        for req_topic in ["kb", "wifi", "demo", "terminal", "workspaces"]:
+        for req_topic in ["kb", "wifi", "demo", "terminal", "workspaces", "power", "profile"]:
             self.assertIn(req_topic, joined)
+
+    def test_wf_man_topic_power_bounded(self) -> None:
+        """'wf man power' documents three-tier power profiles (REQ-PWR-01)."""
+        code, lines = self._run_wf(["man", "power"])
+        self.assertEqual(code, 0)
+        self._assert_bounded_53_cols(lines, "wf man power")
+        joined = "\n".join(lines)
+        self.assertIn("active", joined)
+        self.assertIn("powersave", joined)
+        self.assertIn("airplane", joined)
+
+    def test_wf_man_topic_profile_bounded(self) -> None:
+        """'wf man profile' documents sensory presets & overload mitigation (REQ-ENV-04, REQ-INP-08)."""
+        code, lines = self._run_wf(["man", "profile"])
+        self.assertEqual(code, 0)
+        self._assert_bounded_53_cols(lines, "wf man profile")
+        joined = "\n".join(lines)
+        self.assertIn("classroom", joined)
+        self.assertIn("office", joined)
+        self.assertIn("commute", joined)
+        self.assertIn("Sensory Overload", joined)
 
     def test_wf_man_topic_kb_bounded(self) -> None:
         """'wf man kb' documents CardKB, sticky Ctrl latch, and font geometry."""
@@ -239,6 +262,48 @@ class TestWhiskerFrameCLI(unittest.TestCase):
         self.assertIsNotNone(mod, "pi/bin/wifi should be discoverable and loadable")
         self.assertTrue(hasattr(mod, "main"))
         self.assertTrue(hasattr(mod, "cmd_status"))
+
+    # --- 3a. Power Management & Sensory Profile Delegation Tests -------------
+
+    @patch.object(wf, "_load_power_module")
+    def test_wf_power_delegation(self, mock_load: MagicMock) -> None:
+        """'wf power' delegates arguments to power-profile CLI."""
+        mock_pwr_mod = MagicMock()
+        mock_pwr_mod.main.return_value = 0
+        mock_load.return_value = mock_pwr_mod
+
+        code, _ = self._run_wf(["power", "status"])
+        self.assertEqual(code, 0)
+        mock_pwr_mod.main.assert_called_with(["status"])
+
+        code, _ = self._run_wf(["power", "set", "powersave"])
+        self.assertEqual(code, 0)
+        mock_pwr_mod.main.assert_called_with(["set", "powersave"])
+
+    @patch.object(wf, "_load_profile_module")
+    def test_wf_profile_delegation(self, mock_load: MagicMock) -> None:
+        """'wf profile' delegates arguments to profile CLI."""
+        mock_prof_mod = MagicMock()
+        mock_prof_mod.main.return_value = 0
+        mock_load.return_value = mock_prof_mod
+
+        code, _ = self._run_wf(["profile", "status"])
+        self.assertEqual(code, 0)
+        mock_prof_mod.main.assert_called_with(["status"])
+
+        code, _ = self._run_wf(["profile", "overload", "on"])
+        self.assertEqual(code, 0)
+        mock_prof_mod.main.assert_called_with(["overload", "on"])
+
+    def test_real_power_and_profile_modules_loadable(self) -> None:
+        """Verify dynamic loader imports real power-profile and profile scripts."""
+        pwr_mod = wf._load_power_module()
+        self.assertIsNotNone(pwr_mod)
+        self.assertTrue(hasattr(pwr_mod, "main"))
+
+        prof_mod = wf._load_profile_module()
+        self.assertIsNotNone(prof_mod)
+        self.assertTrue(hasattr(prof_mod, "main"))
 
     # --- 4. Demo and Demo Art Tests ------------------------------------------
 
