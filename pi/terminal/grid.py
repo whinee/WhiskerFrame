@@ -118,6 +118,7 @@ class Grid:
         self.default_bg = default_bg
         self.cursor_row = 0
         self.cursor_col = 0
+        self.dirty: bool = False
         self._cells: list[list[Cell]] = [
             [self._blank() for _ in range(cols)] for _ in range(rows)
         ]
@@ -264,6 +265,7 @@ class Grid:
         ]
         self.cursor_row = 0
         self.cursor_col = 0
+        self.dirty = True
 
     def clear_line(self, row: int | None = None) -> None:
         """
@@ -368,6 +370,7 @@ class Grid:
         clone._cells = [[replace(cell) for cell in row] for row in self._cells]
         clone.cursor_row = self.cursor_row
         clone.cursor_col = self.cursor_col
+        clone.dirty = self.dirty
         return clone
 
     def render_with_cursor(self, cursor_fg: int, cursor_bg: int) -> Grid:
@@ -445,7 +448,8 @@ class Grid:
         `list[CellRun]`: The change runs, ordered by row then column.
 
         """
-        if prev.rows != self.rows or prev.cols != self.cols:
+        if self.dirty or prev.rows != self.rows or prev.cols != self.cols:
+            self.dirty = False
             return self._all_runs()
         runs: list[CellRun] = []
         for row in range(self.rows):
