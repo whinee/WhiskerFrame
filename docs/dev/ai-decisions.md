@@ -1237,5 +1237,40 @@ Field operation of the WhiskerFrame cyberdeck across variable environmental cont
 - In `AIRPLANE` mode, remote SSH/network access is severed by `rfkill block all`. Restoration requires local physical input via the CardKB (`power-profile set active` or `wf power set active`).
 - Watchdog warning displays on top of existing screen contents if the host freezes; cleared cleanly on packet receipt.
 
+---
+
+## DEC-W40: Master Operator and Developer Manual Suite Across 12 Specification Domains (`docs/manual/`)
+
+**Date:** 2026-10-16
+
+**Problem:**
+While low-level subsystem specifications, physical hardware maps, acceptance suites, and unit tests existed across the repository, operators, field sysadmins, and software/hardware developers lacked an authoritative, comprehensive manual suite matching live implementation reality across all 12 formal technical specification domains.
+
+**Root Cause:**
+Documentation was previously dispersed across `docs/specifications/`, `docs/dev/`, `.agents/`, and Python/C++ docstrings. Field operators needed a unified field guide covering cold boot, login, 53-col CardKB ergonomics, workspace chords, power profiles, and emergency troubleshooting. Developers and contributors needed a comprehensive architectural manual documenting the binary wire protocol, VT100 grid diffing, BTRFS storage generation, firmware flashing gates, and test suites.
+
+**Decision:**
+Author a complete, authoritative manual suite in `docs/manual/` strictly synchronized with live code and specifications:
+1. `docs/manual/README.md`: Master documentation index, navigation map, 12-domain matrix, and architectural invariants.
+2. `docs/manual/operator-manual.md`: Comprehensive field operator manual covering system topology, cold boot, PAM login, 53-col typography, CardKB sticky Ctrl latch, virtual workspaces, power profiles, sensory overload mitigation, Wi-Fi helper, guest sandbox demonstrations, mechanical transit/aviation safety, and emergency runbooks.
+3. `docs/manual/developer-manual.md`: Complete developer manual covering system blueprints, three-tier bus hierarchy, wire protocol serialization, double-buffered VT100 grid diffing, I2C debouncing, BTRFS subvolumes, systemd mount generators, firmware architecture, flashing gates, testing suites, CI/CD workflows, and triad conventions.
+4. `docs/manual/domains/`: Twelve dedicated deep-dive domain manuals matching actual implementations and formal specs:
+   - `01-capabilities.md` (`REQ-CAP`): Offline documentation (`wiki`), local scripting, text-only operational modality.
+   - `02-hardware-ux.md` (`REQ-UX`): Form factor, tactile input, anti-distraction, boot/goodbye splashes, a11y themes.
+   - `03-terminal-display.md` (`REQ-TERM`): CYD 320x240 LCD, wire protocol, VT100 cell diffing, multi-geometry fonts, multi-PTY workspaces.
+   - `04-input-subsystem.md` (`REQ-INP`): CardKB 50-key matrix, I2C debouncing, sticky Ctrl latch, NeoPixel feedback, alert arbitration.
+   - `05-storage-lifecycle.md` (`REQ-STORAGE`): 250GB Samsung SSD, BTRFS subvolumes, systemd mount generator, log2ram wear mitigation.
+   - `06-hardware-enclosure.md` (`REQ-HW`): Node matrix, DS3231 RTC, external USB peripherals, 3S UPS, host-lost watchdog.
+   - `07-environmental-transit.md` (`REQ-ENV`): Passive conduction cooling, two-thumb posture, sunlight theme, audio presets, aviation carry-on compliance.
+   - `08-compute-os-containment.md` (`REQ-OPS`): Native systemd services, 416MB RAM bounds, earlyoom, hardened guest sandbox (PAM/nftables/tmpfs/reaper), net watchdog.
+   - `09-power-battery.md` (`REQ-PWR`): Three-tier power profiles (ACTIVE/POWERSAVE/AIRPLANE), INA219 telemetry, 5% cutoff, sleep opcode 0x06.
+   - `10-networking-mesh.md` (`REQ-NET`): 53-col Wi-Fi CLI (`wifi`), rfkill cold boot persistence (regdom PH), NetBird WireGuard mesh, dual-band USB.
+   - `11-mechanical-thermal.md` (`REQ-MECH`): A5 physical envelope (<110x180x70mm), laser-cut acrylic/MDF, shock mounting, passive thermal pad ($k \ge 3.0\text{ W}/(\text{m}\cdot\text{K})$).
+   - `12-modularity-expansion.md` (`REQ-MOD` & `REQ-LIC`): 3-tier bus hierarchy, TVS diode & 100mA PTC protection, STEMMA QT sensor expansion, artwork licensing.
+
+**Tradeoffs / Risk:**
+Zero risk to running systems. Documentation addition strictly matches live implementation and passes all verification gates.
+
+
 
 

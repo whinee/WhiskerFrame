@@ -17,6 +17,25 @@ This software uses [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- Master Operator and Developer Manual Suite Across 12 Specification Domains (`docs/manual/`, DEC-W40, 2026-10-16):
+  - **Comprehensive Field Operator Manual (`docs/manual/operator-manual.md`):** Authored 16-chapter field manual covering hardware topology, cold boot progression, PAM login gate, 53-column typography, CardKB sequential sticky Ctrl latching, multi-PTY workspace management (`Fn+1`..`4`), offline documentation (`wiki`), three-tier power profiles (`ACTIVE`, `POWERSAVE`, `AIRPLANE`), sensory audio profiles (`CLASSROOM`, `OFFICE`, `COMMUTE`) and overload clamp, 53-col Wi-Fi helper (`wifi`) with captive portal navigation (`w3m`), BTRFS storage lifecycle, public hands-on demo sandbox operations, passive thermal management, aviation carry-on compliance (27.75 Wh battery), modular STEMMA QT / Qwiic sensor expansion, and emergency troubleshooting runbooks.
+  - **Comprehensive Developer & Engineering Manual (`docs/manual/developer-manual.md`):** Authored 12-chapter developer manual detailing system blueprints, three-tier electrical bus hierarchy, bit-for-bit wire protocol framing (`0xA5 [LEN] [OP] [PAYLOAD] [CRC8]`), double-buffered VT100 character grid diffing (`Grid.diff`), I2C debouncing state machines, BTRFS subvolume architecture and systemd mount generator internals, 416MB memory safety floors, earlyoom and cgroup slices, coprocessor firmware architecture, sealed-deck flashing safety gate (`flash_cyd_display_link.py`), automated testing strategy (Pytest, Hypothesis, ATP-01..13 suite), and release-gated CI/CD pipelines.
+  - **Master Documentation Index & Navigation Map (`docs/manual/README.md`):** Established unified manual suite index with cross-referencing matrix across all 12 formal technical specification domains, traceability mappings to PRD requirements, and system invariants.
+  - **Twelve Deep-Dive Domain Manuals (`docs/manual/domains/`):**
+    - `01-capabilities.md` (`REQ-CAP`): Offline documentation, local scripting, text-only operational modality.
+    - `02-hardware-ux.md` (`REQ-UX`): Form factor, tactile input, anti-distraction, boot/goodbye splashes, a11y themes.
+    - `03-terminal-display.md` (`REQ-TERM`): CYD 320x240 LCD, wire protocol, VT100 cell diffing, multi-geometry fonts, multi-PTY workspaces.
+    - `04-input-subsystem.md` (`REQ-INP`): CardKB 50-key matrix, I2C debouncing, sticky Ctrl latch, NeoPixel feedback, alert arbitration.
+    - `05-storage-lifecycle.md` (`REQ-STORAGE`): 250GB Samsung SSD, BTRFS subvolumes, systemd mount generator, log2ram wear mitigation.
+    - `06-hardware-enclosure.md` (`REQ-HW`): Node matrix, DS3231 RTC, external USB peripherals, 3S UPS, host-lost watchdog.
+    - `07-environmental-transit.md` (`REQ-ENV`): Passive conduction cooling, two-thumb posture, sunlight theme, audio presets, aviation carry-on compliance.
+    - `08-compute-os-containment.md` (`REQ-OPS`): Native systemd services, 416MB RAM bounds, earlyoom, hardened guest sandbox (PAM/nftables/tmpfs/reaper), net watchdog.
+    - `09-power-battery.md` (`REQ-PWR`): Three-tier power profiles (ACTIVE/POWERSAVE/AIRPLANE), INA219 telemetry, 5% cutoff, sleep opcode 0x06.
+    - `10-networking-mesh.md` (`REQ-NET`): 53-col Wi-Fi CLI (`wifi`), rfkill cold boot persistence (regdom PH), NetBird WireGuard mesh, dual-band USB.
+    - `11-mechanical-thermal.md` (`REQ-MECH`): A5 physical envelope (<110x180x70mm), laser-cut acrylic/MDF, shock mounting, passive thermal pad ($k \ge 3.0\text{ W}/(\text{m}\cdot\text{K})$).
+    - `12-modularity-expansion.md` (`REQ-MOD` & `REQ-LIC`): 3-tier bus hierarchy, TVS diode & 100mA PTC protection, STEMMA QT sensor expansion, artwork licensing.
+  - Details in `docs/dev/ai-decisions.md` (DEC-W40).
+
 - Three-Tier Power Profiles, Sensory Audio Presets, Cognitive Overload Toggle, Firmware Watchdog, and Outdoor Monochrome Theme (DEC-W39, TSK-24..26, 2026-10-16):
   - **Three-Tier Power Management Architecture (`REQ-PWR-01`, TSK-24):** Implemented standalone CLI `pi/bin/power-profile` and integrated `wf power` subcommand managing three formal power profiles: `ACTIVE` (~3.2W, 1.0 GHz CPU governor, radios on, SSD active), `POWERSAVE` (~1.8W, 600 MHz governor, radios on, SSD spun down via `hdparm -y`), and `AIRPLANE` (~0.55W idle, 600 MHz, all radios blocked via `rfkill`, display sleep opcode `0x06`). State persisted to `/run/whiskerframe/power_state.json`. Verified in `test/test_power_profile.py` and ATP-13.
   - **Environmental Audio Presets & Cognitive Sensory Overload Toggle (`REQ-ENV-04`, `REQ-INP-08`, TSK-25):** Implemented standalone CLI `pi/bin/profile` and integrated `wf profile` subcommand managing three environmental audio presets: `CLASSROOM` (0% buzzer, haptics disabled, silent alerts), `OFFICE` (25% buzzer, quiet alerts), and `COMMUTE` (100% buzzer, loud alerts). Implemented single-action sensory overload toggle (`profile overload on` / `wf profile overload`) instantly clamping volume to 0%, suppressing audible buzzers/bells, and routing alerts to visual terminal feedback. Verified in `test/test_sensory_profile.py` and ATP-13.
