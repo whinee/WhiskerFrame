@@ -180,7 +180,7 @@ def load_bridge_config() -> BridgeConfig:
     resolved = BridgeConfig(
         serial_port=str(terminal.get("serial_port", "/dev/ttyUSB0")),
         baud=_as_int(terminal.get("baud"), 115200),
-        font_size=_as_int(terminal.get("font_size"), 2),
+        font_size=_as_int(terminal.get("font_size"), 1),
         keyframe_interval_s=_as_float(terminal.get("keyframe_interval_seconds"), 30.0),
         cardkb_bus=_as_int(cardkb.get("i2c_bus"), 0),
         cardkb_address=_as_int(cardkb.get("i2c_address"), 0x5F),

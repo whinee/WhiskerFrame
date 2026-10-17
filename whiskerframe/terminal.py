@@ -65,7 +65,7 @@ class TerminalGeometry(NamedTuple):
     ``font_size`` selector and the fixed `whiskerframe.metrics.FONT_METRICS`
     cell sizes, flooring the panel extent by the cell extent so the grid never
     overflows the visible area. For the shipped sizes this yields size 1 ->
-    53x30, size 2 -> 26x15, size 3 -> 17x10.
+    53x30, size 5 -> 40x20, size 3 -> 17x10.
 
     Construct instances via :meth:`for_font_size` rather than directly, so the
     geometry always matches the metrics table.

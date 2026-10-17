@@ -195,5 +195,55 @@
         state: started
         daemon_reload: true
 
+# ==========================================================================
+# Kiwix Serve — offline Wikipedia / ZIM server (kiwix-tools via apt)
+# ==========================================================================
+- name: Set up Kiwix offline wiki server
+  tags: [kiwix]
+  block:
+    - name: Ensure kiwix-tools is installed
+      ansible.builtin.apt:
+        name: kiwix-tools
+        state: present
+        update_cache: true
+
+    - name: Ensure Kiwix ZIM storage directory exists on SSD
+      ansible.builtin.file:
+        path: "{{ ssd_mount_point }}/kiwix"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install kiwix-serve systemd unit (with MemoryMax ceiling)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/kiwix-serve.service
+        content: |
+          [Unit]
+          Description=Kiwix Offline Wiki Server (kiwix-serve)
+          After=network.target local-fs.target
+
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/bin/kiwix-serve --port=8088 --address=127.0.0.1 {{ ssd_mount_point }}/kiwix/*.zim
+          Restart=on-failure
+          RestartSec=5
+          MemoryMax=128M
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart kiwix-serve
+
+    - name: Enable and start kiwix-serve
+      ansible.builtin.systemd:
+        name: kiwix-serve
+        enabled: true
+        state: started
+        daemon_reload: true
+
 - name: Apply pending restarts
   ansible.builtin.meta: flush_handlers

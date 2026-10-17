@@ -36,9 +36,9 @@ def verify_visual_pipeline(output_dir: Path) -> dict[str, Path]:
     screen_rect = XYWH(0, 0, 320, 240)
     box_rect = XYWH(10, 10, 300, 220)
 
-    builder.draw_rect(screen_rect, color=0x18C5, filled=True)  # Background
-    builder.draw_rect(box_rect, color=0x50DC, filled=False)  # Border
-    builder.draw_text(
+    cmd1 = builder.draw_rect(screen_rect, color=0x18C5, filled=True)  # Background
+    cmd2 = builder.draw_rect(box_rect, color=0x50DC, filled=False)  # Border
+    cmd3 = builder.draw_text(
         screen_rect,
         text="WHISKERFRAME CYBERDECK\nVisual Verification Active\nDisplay: ILI9341 320x240",
         anchor="mt",
@@ -46,7 +46,7 @@ def verify_visual_pipeline(output_dir: Path) -> dict[str, Path]:
         multiline=True,
         inverted=False,
     )
-    builder.draw_text(
+    cmd4 = builder.draw_text(
         box_rect,
         text="[OK] Framebuffer Bypass Verified\n[OK] Serial Command Pipeline Active\n[OK] Multi-Geometry Typography Ready",
         anchor="lt",
@@ -54,7 +54,7 @@ def verify_visual_pipeline(output_dir: Path) -> dict[str, Path]:
     )
 
     renderer = PreviewRenderer(width=320, height=240, background=0x0000)
-    image = renderer.render(builder.commands)
+    image = renderer.render([cmd1, cmd2, cmd3, cmd4])
     png_path = output_dir / "visual_verify_render.png"
     image.save(png_path)
     results["render_png"] = png_path

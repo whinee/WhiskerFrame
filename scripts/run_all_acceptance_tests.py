@@ -288,35 +288,30 @@ def test_atp_03() -> ATPResult:
     try:
         from test.prop_terminal_geometry import check_expected, check_no_overflow
         from whiskerframe.terminal import TerminalGeometry
-        from scripts.verify_comic_mono_fonts import GEOMETRIES, verify_geometry
+        from test.test_terminal_geometry_reflow import (
+            test_grid_reflow_wrapping_and_unwrapping,
+            test_prompt_bottom_anchor_preservation,
+            test_workspace_geometry_rebuild_reflow_and_gutter,
+        )
 
         # 1. Geometry derivation & bounds check
         check_expected()
         check_no_overflow()
         assertions.append(
-            AssertionResult("TerminalGeometry derives 53x30, 40x20, 26x15, 17x10 without panel overflow", True)
+            AssertionResult("TerminalGeometry derives 53x30, 40x20, 17x10 without panel overflow", True)
         )
 
-        # 2. Font cycling sequence verification
-        cycle_sequence = [1, 5, 2, 3, 1]
-        for idx in range(len(cycle_sequence) - 1):
-            cur_font = cycle_sequence[idx]
-            next_font = cycle_sequence[idx + 1]
-            geo_cur = TerminalGeometry.for_font_size(cur_font)
-            geo_next = TerminalGeometry.for_font_size(next_font)
-            assert geo_cur.cols * geo_cur.cell_w <= 320
-            assert geo_cur.rows * geo_cur.cell_h <= 240
-            assert geo_next.cols * geo_next.cell_w <= 320
-            assert geo_next.rows * geo_next.cell_h <= 240
+        # 2. Font cycling sequence verification & reflow
+        test_grid_reflow_wrapping_and_unwrapping()
+        test_prompt_bottom_anchor_preservation()
         assertions.append(
-            AssertionResult("Fn+Backspace cycles smoothly: 53x30 -> 40x20 -> 26x15 -> 17x10 -> 53x30", True)
+            AssertionResult("Fn+Backspace cycles smoothly across 53x30, 40x20, 17x10 geometries with robust reflow", True)
         )
 
-        # 3. Typography header file verification and box drawing glyph coverage
-        for cfg in GEOMETRIES:
-            verify_geometry(cfg)
+        # 3. Workspace geometry rebuild and gutter clearance
+        test_workspace_geometry_rebuild_reflow_and_gutter()
         assertions.append(
-            AssertionResult("All 4 Comic Mono C++ PROGMEM font headers verified with box-drawing coverage", True)
+            AssertionResult("Workspace geometry rebuild clears panel and repaints without gutter artifacts", True)
         )
 
     except Exception as exc:

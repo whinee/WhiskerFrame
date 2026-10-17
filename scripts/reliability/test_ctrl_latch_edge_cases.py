@@ -60,7 +60,7 @@ class TestCtrlLatchEdgeCases(unittest.TestCase):
 
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = load_theme(None)
-        self.mock_bridge._geometry = TerminalGeometry.for_font_size(2)
+        self.mock_bridge._geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge._paint = MagicMock()
         self.mock_bridge._rebuild_geometry = MagicMock()
         self.mock_bridge._cardkb = self.mock_cardkb
@@ -164,7 +164,7 @@ class TestCtrlLatchProperties(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = load_theme(None)
-        self.mock_bridge._geometry = TerminalGeometry.for_font_size(2)
+        self.mock_bridge._geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge._paint = MagicMock()
         self.mock_bridge.set_ctrl_led = MagicMock()
         self.master_fd = 888

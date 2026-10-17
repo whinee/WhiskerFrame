@@ -158,7 +158,7 @@ class TestStressEndurance:
         """Perform 200 rapid workspace switches while feeding concurrent PTY streams."""
         mock_bridge = MagicMock()
         mock_bridge._theme = load_theme(None)
-        mock_bridge._geometry = TerminalGeometry.for_font_size(2)
+        mock_bridge._geometry = TerminalGeometry.for_font_size(1)
         mock_bridge._paint = MagicMock()
         mock_bridge._prev = None
 

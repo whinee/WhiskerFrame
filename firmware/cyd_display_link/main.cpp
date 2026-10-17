@@ -73,6 +73,7 @@ static void dispatch(cyd_display_link::FrameDecoder& dec) {
   host_ever_seen = true;
   if (watchdog_warning_active) {
     watchdog_warning_active = false;
+    tft.fillRect(0, 0, 320, 16, TFT_BLACK);
   }
 
   if (is_sleeping && dec.opcode() != cyd_display_link::kOpcodeSleep) {

@@ -38,7 +38,7 @@ DISPLAY GEOMETRY CHORD:
   Fn+Backspace  Cycle font / display geometry
                 (top-right key, labeled 'del')
                 Font 1: 53x30 (high density)
-                Font 2: 26x15 (default readable)
+                Font 5: 40x20 (readable)
                 Font 3: 17x10 (large type)
 
 WORKSPACE NAVIGATION:

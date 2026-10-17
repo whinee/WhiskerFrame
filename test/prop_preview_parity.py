@@ -62,7 +62,7 @@ _ANCHORS: tuple[Anchor, ...] = (
     "rb",
 )
 
-_FONT_SIZES: tuple[int, ...] = (1, 2, 3, 4)
+_FONT_SIZES: tuple[int, ...] = (1, 3, 4, 5)
 
 # Keep rectangle extents small enough that any resolved anchor pixel stays within
 # the uint16 wire bounds and the builder never rejects placement.

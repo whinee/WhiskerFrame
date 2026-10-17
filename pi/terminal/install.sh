@@ -62,7 +62,8 @@ done
 # 3. Guest PAM login autostart & CLI helpers
 echo "Configuring guest demo autostart in /etc/profile.d/guest-demo.sh ..."
 cat << 'EOF' > /etc/profile.d/guest-demo.sh
-if [ "${USER:-$(id -un 2>/dev/null)}" = "guest" ] && [ -n "$PS1" ]; then
+if [ "${USER:-$(id -un 2>/dev/null)}" = "guest" ] && [ -n "$PS1" ] && [ -z "${CYD_DEMO_LAUNCHED:-}" ]; then
+    export CYD_DEMO_LAUNCHED=1
     if [ -x /usr/local/bin/wf ]; then
         /usr/local/bin/wf demo
     elif [ -x /usr/local/bin/demo ]; then

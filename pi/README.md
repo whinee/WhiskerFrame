@@ -60,7 +60,7 @@ ssh -i /home/lyra/.ssh/id_rsa root@10.0.0.212 \
 from whiskerframe import XYWH, CommandBuilder, TextStyle, serialize
 from whiskerframe.transport import SerialTransport
 b = CommandBuilder()
-cmd = b.draw_text(XYWH(10,10,120,60), 'Meow', anchor='mm', style=TextStyle(color=0xFFFF, font_size=2))
+cmd = b.draw_text(XYWH(10,10,120,60), 'Meow', anchor='mm', style=TextStyle(color=0xFFFF, font_size=1))
 with SerialTransport('/dev/ttyUSB0', 115200) as t:
     t.send(serialize(cmd))
 print('sent')

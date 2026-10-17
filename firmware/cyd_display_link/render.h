@@ -58,10 +58,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "font_6x8.h"
-#include "font_8x12.h"
-#include "font_12x16.h"
-#include "font_18x24.h"
 #include "frame.h"
 
 namespace cyd_display_link {
@@ -407,54 +403,6 @@ inline void render_cells(TFT_eSPI& tft, const uint8_t* payload, uint16_t len) {
   }
   if (bg_w > 0) {
     tft.fillRect(base_x, base_y, bg_w, cell_h, bg);
-  }
-
-  if (font_size == 1 || font_size == 0) {
-    for (uint16_t i = 0; i < run_len; ++i) {
-      const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
-      if (cx >= screen_w) {
-        break;
-      }
-      const uint8_t* bmp = glyph_6x8_bitmap(static_cast<char>(glyphs[i]));
-      tft.drawBitmap(cx, base_y, bmp, 6, 8, fg, bg);
-    }
-    return;
-  }
-
-  if (font_size == 5) {
-    for (uint16_t i = 0; i < run_len; ++i) {
-      const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
-      if (cx >= screen_w) {
-        break;
-      }
-      const uint8_t* bmp = glyph_8x12_bitmap(static_cast<char>(glyphs[i]));
-      tft.drawBitmap(cx, base_y, bmp, 8, 12, fg, bg);
-    }
-    return;
-  }
-
-  if (font_size == 2) {
-    for (uint16_t i = 0; i < run_len; ++i) {
-      const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
-      if (cx >= screen_w) {
-        break;
-      }
-      const uint8_t* bmp = glyph_12x16_bitmap(static_cast<char>(glyphs[i]));
-      tft.drawBitmap(cx, base_y, bmp, 12, 16, fg, bg);
-    }
-    return;
-  }
-
-  if (font_size == 3) {
-    for (uint16_t i = 0; i < run_len; ++i) {
-      const int32_t cx = base_x + static_cast<int32_t>(i) * cell_w;
-      if (cx >= screen_w) {
-        break;
-      }
-      const uint8_t* bmp = glyph_18x24_bitmap(static_cast<char>(glyphs[i]));
-      tft.drawBitmap(cx, base_y, bmp, 18, 24, fg, bg);
-    }
-    return;
   }
 
   tft.setTextDatum(TL_DATUM);

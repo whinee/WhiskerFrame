@@ -41,7 +41,7 @@ class TestCtrlLatch(unittest.TestCase):
 
     def setUp(self) -> None:
         self.theme = load_theme(None)
-        self.geometry = TerminalGeometry.for_font_size(2)
+        self.geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = self.theme
         self.mock_bridge._geometry = self.geometry
@@ -142,15 +142,15 @@ class TestCtrlLatch(unittest.TestCase):
         mock_write.assert_called_once_with(self.master_fd, b"1")
 
     @patch("os.write")
-    def test_arrow_cancels_and_passes_through(self, mock_write: MagicMock) -> None:
-        """Arrow key cancels latch and passes escape sequence."""
+    def test_scroll_chord_cancels_latch_and_navigates(self, mock_write: MagicMock) -> None:
+        """Fn+Down scroll chord (0xB6) cancels latch and triggers scrollback navigation (no PTY write)."""
         self.session._process_single_key(CTRL_LATCH_CHORD)
         self.assertTrue(self.session._is_ctrl_armed())
 
-        # Down arrow (0xB6)
+        # Down arrow / scroll down (0xB6)
         self.session._process_single_key(0xB6)
         self.assertFalse(self.session._is_ctrl_armed())
-        mock_write.assert_called_once_with(self.master_fd, b"\x1b[B")
+        mock_write.assert_not_called()
 
     def test_timeout_expiration(self) -> None:
         """Latch expires after 3.0 seconds."""

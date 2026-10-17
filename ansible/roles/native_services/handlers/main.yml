@@ -11,3 +11,9 @@
     name: filebrowser
     state: restarted
   listen: restart filebrowser
+
+- name: restart kiwix-serve
+  ansible.builtin.systemd:
+    name: kiwix-serve
+    state: restarted
+  listen: restart kiwix-serve

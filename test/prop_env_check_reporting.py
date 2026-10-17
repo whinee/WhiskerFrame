@@ -35,11 +35,12 @@ from pi_env_check import (
 
 
 @settings(max_examples=300)
-@given(python3=st.booleans(), pip=st.booleans(), pyserial=st.booleans())
+@given(python3=st.booleans(), pip=st.booleans(), pyserial=st.booleans(), kiwix_tools=st.booleans())
 def check_reports_exactly_missing(
     python3: bool,
     pip: bool,
     pyserial: bool,
+    kiwix_tools: bool,
 ) -> None:
     """
     Assert the report names exactly the absent components (Property 10).
@@ -48,6 +49,7 @@ def check_reports_exactly_missing(
     - python3 (`bool`): Whether ``python3`` is present.
     - pip (`bool`): Whether ``pip`` is present.
     - pyserial (`bool`): Whether ``pyserial`` is present.
+    - kiwix_tools (`bool`): Whether ``kiwix-tools`` is present.
 
     Raises:
     - `AssertionError`: If the missing list is not the absent components in
@@ -57,8 +59,8 @@ def check_reports_exactly_missing(
     `None`: This check returns nothing when reporting is correct.
 
     """
-    presence = ComponentPresence(python3=python3, pip=pip, pyserial=pyserial)
-    flags = {"python3": python3, "pip": pip, "pyserial": pyserial}
+    presence = ComponentPresence(python3=python3, pip=pip, pyserial=pyserial, kiwix_tools=kiwix_tools)
+    flags = {"python3": python3, "pip": pip, "pyserial": pyserial, "kiwix-tools": kiwix_tools}
     expected = tuple(name for name in COMPONENTS if not flags[name])
 
     assert missing_components(presence) == expected

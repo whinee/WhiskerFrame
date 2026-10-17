@@ -144,6 +144,7 @@ def build_probes(venv_path: str = DEFAULT_VENV_PATH) -> dict[str, tuple[str, ...
         "python3": ("sh", "-c", _probe_script(venv_path, "--version")),
         "pip": ("sh", "-c", _pip_probe_script(venv_path)),
         "pyserial": ("sh", "-c", _probe_script(venv_path, "-c 'import serial'")),
+        "kiwix-tools": ("sh", "-c", "command -v kiwix-serve || dpkg -s kiwix-tools"),
     }
 
 
@@ -173,6 +174,7 @@ class ComponentPresence(NamedTuple):
     python3: bool
     pip: bool
     pyserial: bool
+    kiwix_tools: bool
 
 
 class EnvReport(NamedTuple):
@@ -228,6 +230,7 @@ def missing_components(presence: ComponentPresence) -> tuple[str, ...]:
         "python3": presence.python3,
         "pip": presence.pip,
         "pyserial": presence.pyserial,
+        "kiwix-tools": presence.kiwix_tools,
     }
     return tuple(name for name in COMPONENTS if not flags[name])
 

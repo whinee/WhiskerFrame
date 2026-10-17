@@ -1,37 +1,23 @@
-r"""
-Optional Pillow-based host-side preview renderer for the CYD Display Link.
-
-Render a host-side image of resolved :class:`whiskerframe.models.DrawText` and
-:class:`whiskerframe.models.DrawRect` commands so a caller can visually verify
-drawing output before sending commands to the CYD (Req 4.1). The renderer
-mirrors the imagesmacker 7.0.0 anchor, coordinate, and multiline-text model
-(Req 4.2) by reusing the exact placement inputs the pure
-:class:`whiskerframe.builder.CommandBuilder` already resolved: every command's
-``(x, y)`` anchor pixel is the value :meth:`RectangleCoordinates.anchor_coordinates`
-returned, and multiline blocks stack by the same ``line_h`` advance and metrics
-table (:mod:`whiskerframe.metrics`) the builder used. Placement therefore matches
-device placement rather than reimplementing the anchor math differently
-(Property 6, Req 8.4).
-
-Pillow is an optional dependency (the ``preview`` extra). Its import is guarded
-and lazy: importing this module never requires Pillow, and
-:class:`whiskerframe.builder.CommandBuilder` stays fully operable without it.
-Only when a preview function is actually invoked without Pillow installed is a
-clear error raised naming the missing dependency (Req 4.4).
-"""
-
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
+"""
+Optional Pillow-based host-side preview renderer for the CYD Display Link.
 
-from whiskerframe.anchors import resolve_anchor
-from whiskerframe.metrics import line_height as glyph_height
-from whiskerframe.metrics import line_width
-from whiskerframe.models import DrawRect, DrawText
+Render a host-side image of resolved :class:`whiskerframe.models.DrawText`,
+:class:`whiskerframe.models.DrawRect`, :class:`whiskerframe.terminal.DrawCells`,
+:class:`whiskerframe.terminal.Scroll`, and :class:`whiskerframe.terminal.DrawImage`
+commands so a caller can visually verify drawing output before sending commands
+to the CYD (Req 4.1). The renderer mirrors the protocol anchor, coordinate,
+and multiline-text model (Req 4.2) by reusing the exact placement inputs the pure
+:class:`whiskerframe.builder.CommandBuilder` and terminal bridge already resolved.
+Clearly labels physical device capture versus host reconstruction from authoritative
+ordered display updates (since the hardware protocol is write-only over serial/UART).
 
-if TYPE_CHECKING:
-    from PIL import Image
+Pillow is an optional dependency (the ``preview`` extra). Its import is guarded
+and lazy: importing this module never requires Pillow, and command models stay
+fully operable without it. Only when a preview function is actually invoked without
+Pillow installed is a clear error raised naming the missing dependency (Req 4.4).
+"""
 
 __all__ = [
     "DEFAULT_BG_RGB565",
@@ -40,6 +26,20 @@ __all__ = [
     "PreviewRenderer",
     "rgb565_to_rgb888",
 ]
+
+import struct
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, cast
+
+from whiskerframe.anchors import resolve_anchor
+from whiskerframe.metrics import FONT_METRICS
+from whiskerframe.metrics import line_height as glyph_height
+from whiskerframe.metrics import line_width
+from whiskerframe.models import DrawRect, DrawText
+from whiskerframe.terminal import DrawCells, DrawImage, Scroll
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 DISPLAY_WIDTH: int = 320
 """Default preview canvas width in pixels, matching the rotated ILI9341 extent."""
@@ -107,18 +107,10 @@ class PreviewRenderer:
     """
     Render resolved drawing commands to a Pillow image for host-side preview.
 
-    Draw the resolved :class:`whiskerframe.models.DrawText` and
-    :class:`whiskerframe.models.DrawRect` commands produced by
-    :class:`whiskerframe.builder.CommandBuilder` onto an RGB canvas, reusing the
-    commands' already-resolved anchor coordinates and the shared
-    :mod:`whiskerframe.metrics` table so preview placement matches device
-    placement exactly (Property 6, Req 4.2, 8.4). The renderer performs no anchor
-    math of its own beyond honoring the resolved ``(x, y)`` and packed ``anchor``
-    each command carries.
-
-    Pillow is imported lazily on the first draw, so constructing a renderer and
-    importing this module never require the ``preview`` extra; a clear error is
-    raised only when :meth:`render` is called without Pillow installed (Req 4.4).
+    Draw resolved :class:`whiskerframe.models.DrawText`, :class:`whiskerframe.models.DrawRect`,
+    :class:`whiskerframe.terminal.DrawCells`, :class:`whiskerframe.terminal.Scroll`,
+    and :class:`whiskerframe.terminal.DrawImage` commands onto an RGB canvas, reconstructing
+    display state from authoritative ordered display updates (write-only hardware protocol).
     """
 
     def __init__(
@@ -127,101 +119,62 @@ class PreviewRenderer:
         height: int = DISPLAY_HEIGHT,
         background: int = DEFAULT_BG_RGB565,
     ) -> None:
-        """
-        Initialize the preview canvas dimensions and background color.
-
-        Args:
-        - width (`int`, optional): Canvas width in px. Defaults to `DISPLAY_WIDTH`.
-        - height (`int`, optional): Canvas height in px. Defaults to `DISPLAY_HEIGHT`.
-        - background (`int`, optional): RGB565 canvas fill. Defaults to `DEFAULT_BG_RGB565`.
-
-        Raises:
-        - `ValueError`: If ``width`` or ``height`` is not positive.
-
-        Returns:
-        `None`: This initializer does not return a value.
-
-        """
         if width <= 0 or height <= 0:
             msg = f"Canvas dimensions must be positive, got {width}x{height}."
             raise ValueError(msg)
         self.width = width
         self.height = height
         self.background = background
+        self.active_cell_height = 8  # Default size-1 cell height
 
-    def render(self, commands: Iterable[DrawText | DrawRect]) -> Image.Image:
+    def draw_command(
+        self,
+        image: 'Image.Image',
+        command: DrawText | DrawRect | DrawCells | Scroll | DrawImage,
+    ) -> 'Image.Image':
         """
-        Render an iterable of resolved commands onto a fresh preview image.
-
-        Create the canvas, then draw each command in order using the placement
-        already resolved by the :class:`whiskerframe.builder.CommandBuilder`, so
-        preview coordinates equal the coordinates the device receives (Property 6,
-        Req 4.1, 4.2). Pillow is imported lazily here; without it a clear error
-        naming the ``preview`` extra is raised (Req 4.4).
+        Draw a single resolved command onto an existing Pillow image buffer.
 
         Args:
-        - commands (`Iterable[DrawText | DrawRect]`): Resolved commands to draw, in z-order.
-
-        Raises:
-        - `RuntimeError`: If Pillow is not installed.
-        - `TypeError`: If a command is neither a `DrawText` nor a `DrawRect`.
+        - image (`Image.Image`): Target Pillow RGB image.
+        - command (`DrawText | DrawRect | DrawCells | Scroll | DrawImage`): Resolved command.
 
         Returns:
-        `Image.Image`: The rendered RGB preview image.
-
+        `Image.Image`: The updated image.
         """
         image_module = _require_pillow()
         from PIL import ImageDraw
+        draw = ImageDraw.Draw(image)
+        self._draw_command(draw, command)
+        return cast("Image.Image", image)
 
+    def render(self, commands: Iterable[DrawText | DrawRect | DrawCells | Scroll | DrawImage]) -> 'Image.Image':
+        image_module = _require_pillow()
         image = image_module.new(
             "RGB",
             (self.width, self.height),
             rgb565_to_rgb888(self.background),
         )
-        draw = ImageDraw.Draw(image)
         for command in commands:
-            self._draw_command(draw, command)
+            self.draw_command(image, command)
         return cast("Image.Image", image)
 
-    def _draw_command(self, draw: object, command: DrawText | DrawRect) -> None:
-        """
-        Dispatch a single resolved command to its Pillow drawing routine.
-
-        Args:
-        - draw (`object`): The Pillow ``ImageDraw.ImageDraw`` target.
-        - command (`DrawText | DrawRect`): Resolved command to draw.
-
-        Raises:
-        - `TypeError`: If ``command`` is neither a `DrawText` nor a `DrawRect`.
-
-        Returns:
-        `None`: This method draws in place and returns nothing.
-
-        """
+    def _draw_command(self, draw: object, command: DrawText | DrawRect | DrawCells | Scroll | DrawImage) -> None:
         if isinstance(command, DrawText):
             self._draw_text(draw, command)
         elif isinstance(command, DrawRect):
             self._draw_rect(draw, command)
+        elif isinstance(command, DrawCells):
+            self._draw_cells(draw, command)
+        elif isinstance(command, Scroll):
+            self._draw_scroll(draw, command)
+        elif isinstance(command, DrawImage):
+            self._draw_image(draw, command)
         else:
             msg = f"Cannot preview object of type {type(command).__name__!r}."
             raise TypeError(msg)
 
     def _draw_rect(self, draw: object, command: DrawRect) -> None:
-        """
-        Draw a resolved ``DrawRect`` onto the canvas.
-
-        Use the command's resolved top-left origin and dimensions directly, so the
-        rectangle occupies the same pixels the firmware would draw. A filled
-        rectangle fills the RGB565 color; an outline strokes it.
-
-        Args:
-        - draw (`object`): The Pillow ``ImageDraw.ImageDraw`` target.
-        - command (`DrawRect`): Resolved rectangle command.
-
-        Returns:
-        `None`: This method draws in place and returns nothing.
-
-        """
         color = rgb565_to_rgb888(command.color)
         x2 = command.x + command.w
         y2 = command.y + command.h
@@ -232,29 +185,11 @@ class PreviewRenderer:
             draw.rectangle(box, outline=color)
 
     def _draw_text(self, draw: object, command: DrawText) -> None:
-        """
-        Draw a resolved ``DrawText`` onto the canvas, honoring multiline stacking.
-
-        Reuse the command's resolved anchor pixel ``(x, y)`` and packed ``anchor``
-        to compute each line's origin exactly as the on-device renderer does:
-        single-line text is placed with its anchor point at ``(x, y)``; multiline
-        text stacks lines by ``line_h`` under the same block anchor. Line widths
-        and heights come from the shared :mod:`whiskerframe.metrics` table, so the
-        preview reuses the builder's sizing rather than reimplementing it
-        (Property 6, Req 4.2).
-
-        Args:
-        - draw (`object`): The Pillow ``ImageDraw.ImageDraw`` target.
-        - command (`DrawText`): Resolved text command.
-
-        Returns:
-        `None`: This method draws in place and returns nothing.
-
-        """
         fill = rgb565_to_rgb888(command.color)
         lines = command.text.split("\n")
         cell_height = glyph_height(command.font_size)
         advance = command.line_h if command.multiline else cell_height
+
         for row, line in enumerate(lines):
             origin_x, origin_y = self._line_origin(
                 command,
@@ -263,7 +198,83 @@ class PreviewRenderer:
                 advance,
                 cell_height,
             )
+            if not line:
+                continue
             draw.text((origin_x, origin_y), line, fill=fill)
+
+    def _draw_cells(self, draw: object, command: DrawCells) -> None:
+        metrics = FONT_METRICS.get(command.font_size, FONT_METRICS[1])
+        cell_w = metrics.cell_width
+        cell_h = metrics.cell_height
+        self.active_cell_height = cell_h
+
+        base_x = command.col * cell_w
+        base_y = command.row * cell_h
+        if base_y < 0 or base_y >= self.height or base_x >= self.width:
+            return
+
+        run_px = len(command.text) * cell_w
+        bg_w = min(run_px, self.width - base_x)
+        if bg_w > 0:
+            bg_color = rgb565_to_rgb888(command.bg)
+            draw.rectangle((base_x, base_y, base_x + bg_w, base_y + cell_h), fill=bg_color)
+
+        fg_color = rgb565_to_rgb888(command.fg)
+
+        for i, ch in enumerate(command.text):
+            cx = base_x + i * cell_w
+            if cx >= self.width:
+                break
+            if ch != ' ' and ch != '\0':
+                draw.text((cx, base_y), ch, fill=fg_color)
+
+    def _draw_scroll(self, draw: object, command: Scroll) -> None:
+        if command.bottom < command.top:
+            return
+        cell_h = self.active_cell_height
+        band_top = max(0, command.top * cell_h)
+        band_bottom = min(self.height, (command.bottom + 1) * cell_h)
+        band_h = band_bottom - band_top
+        if band_h <= 0:
+            return
+
+        shift = (abs(command.rows)) * cell_h
+        fill_color = rgb565_to_rgb888(command.fill)
+
+        image = draw._image  # type: ignore
+        if command.rows == 0 or shift >= band_h:
+            draw.rectangle((0, band_top, self.width, band_bottom), fill=fill_color)
+            return
+
+        if command.rows > 0:
+            # Scroll up
+            box = (0, band_top + shift, self.width, band_bottom)
+            region = image.crop(box)
+            image.paste(region, (0, band_top))
+            draw.rectangle((0, band_bottom - shift, self.width, band_bottom), fill=fill_color)
+        else:
+            # Scroll down
+            box = (0, band_top, self.width, band_bottom - shift)
+            region = image.crop(box)
+            image.paste(region, (0, band_top + shift))
+            draw.rectangle((0, band_top, self.width, band_top + shift), fill=fill_color)
+
+    def _draw_image(self, draw: object, command: DrawImage) -> None:
+        image = draw._image  # type: ignore
+        w = command.w
+        h = command.h
+        if w == 0 or h == 0 or len(command.data) < w * h * 2:
+            return
+        pixels = struct.unpack(f"<{w * h}H", command.data[:w * h * 2])
+        rgb888_bytes = bytearray(w * h * 3)
+        for i, p in enumerate(pixels):
+            r8, g8, b8 = rgb565_to_rgb888(p)
+            rgb888_bytes[i * 3] = r8
+            rgb888_bytes[i * 3 + 1] = g8
+            rgb888_bytes[i * 3 + 2] = b8
+        from PIL import Image as PILImage
+        patch = PILImage.frombytes("RGB", (w, h), bytes(rgb888_bytes))
+        image.paste(patch, (command.x, command.y))
 
     @staticmethod
     def _line_origin(
@@ -273,28 +284,6 @@ class PreviewRenderer:
         advance: int,
         cell_height: int,
     ) -> tuple[int, int]:
-        """
-        Compute a single line's top-left origin under the resolved block anchor.
-
-        Mirror the builder/device placement: the block's anchor point is the
-        resolved ``(command.x, command.y)``. The horizontal key shifts the line
-        left/center/right of ``command.x`` by its measured width, the vertical key
-        shifts the whole block up/middle/down of ``command.y`` by its stacked
-        height, and ``row * advance`` offsets each successive line. All math is the
-        pure integer floor-division used by :mod:`whiskerframe.metrics` and
-        :mod:`whiskerframe.coordinates`.
-
-        Args:
-        - command (`DrawText`): Resolved text command carrying the anchor and origin.
-        - line (`str`): The single line being placed.
-        - row (`int`): Zero-based line index within the block.
-        - advance (`int`): Per-line vertical advance in px.
-        - cell_height (`int`): Glyph cell height in px for the font size.
-
-        Returns:
-        `tuple[int, int]`: The ``(x, y)`` top-left origin for this line.
-
-        """
         horizontal, vertical = resolve_anchor(command.anchor)
         width = line_width(line, command.font_size)
         block_height = (len(command.text.split("\n")) - 1) * advance + cell_height
