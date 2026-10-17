@@ -19,8 +19,8 @@ if [ "${PAM_USER:-}" = "$GUEST_USER" ] && [ "${PAM_TYPE:-}" = "open_session" ]; 
     if [ ! -f "$GUEST_HOME/.bashrc" ]; then
         cp -r /etc/skel/. "$GUEST_HOME/" 2>/dev/null || true
     fi
-    if ! grep -q "wf demo" "$GUEST_HOME/.bashrc" 2>/dev/null; then
-        echo '[ -n "$PS1" ] && { [ -x /usr/local/bin/wf ] && /usr/local/bin/wf demo || ([ -x /usr/local/bin/demo ] && /usr/local/bin/demo); }' >> "$GUEST_HOME/.bashrc"
+    if ! grep -q "CYD_DEMO_LAUNCHED" "$GUEST_HOME/.bashrc" 2>/dev/null; then
+        echo 'if [ -z "${CYD_DEMO_LAUNCHED:-}" ]; then export CYD_DEMO_LAUNCHED=1; [ -n "$PS1" ] && { [ -x /usr/local/bin/wf ] && /usr/local/bin/wf demo || ([ -x /usr/local/bin/demo ] && /usr/local/bin/demo); }; fi' >> "$GUEST_HOME/.bashrc"
     fi
     chown -R "$GUEST_USER:$GUEST_USER" "$GUEST_HOME" 2>/dev/null || true
     chmod 0700 "$GUEST_HOME" 2>/dev/null || true

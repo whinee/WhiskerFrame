@@ -4,8 +4,8 @@ Property/unit test for the CYD terminal grid geometry.
 **Validates: Requirements (cyd-terminal design: Resizable terminal)**
 
 Assert that :class:`whiskerframe.terminal.TerminalGeometry.for_font_size` derives
-the documented column/row counts and cell sizes for font sizes 1-3 on the fixed
-320x240 panel (size 1 -> 53x30, size 2 -> 26x15, size 3 -> 17x10), and that cols
+the documented column/row counts and cell sizes for font sizes on the fixed
+320x240 panel (size 1 -> 53x30, size 5 -> 40x20, size 3 -> 17x10), and that cols
 and rows never overflow the panel for any font size in the metrics table.
 
 The script is pure (no hardware, no Pillow), runs as
@@ -23,7 +23,6 @@ from whiskerframe.terminal import DISPLAY_HEIGHT, DISPLAY_WIDTH, TerminalGeometr
 _EXPECTED: dict[int, tuple[int, int, int, int]] = {
     # font_size: (cols, rows, cell_w, cell_h)
     1: (53, 30, 6, 8),
-    2: (26, 15, 12, 16),
     3: (17, 10, 18, 24),
     5: (40, 20, 8, 12),
 }

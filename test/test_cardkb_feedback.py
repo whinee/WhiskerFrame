@@ -244,7 +244,7 @@ class TestCtrlLatchFeedbackAndIndicatorRecolor(unittest.TestCase):
 
     def setUp(self) -> None:
         self.theme = load_theme(None)
-        self.geometry = TerminalGeometry.for_font_size(2)
+        self.geometry = TerminalGeometry.for_font_size(1)
 
         self.mock_cardkb = MagicMock()
         self.mock_cardkb.set_led = MagicMock()

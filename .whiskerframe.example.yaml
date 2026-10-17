@@ -42,7 +42,7 @@ cyd:
 terminal:
   serial_port: CHANGEME      # same device as cyd.port above
   baud: 115200
-  font_size: 2               # 1->53x30, 2->26x15, 3->17x10 (resizable at runtime)
+  font_size: 1               # 1->53x30, 5->40x20, 3->17x10 (resizable at runtime)
   keyframe_interval_seconds: 30  # periodic full repaint (recover from CYD reset)
   shell: /bin/bash
   # Optional: load a named JSON theme from assets/themes/ (name with or without

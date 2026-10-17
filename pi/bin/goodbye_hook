@@ -146,7 +146,7 @@ def send_goodbye(
                 anchor="mm",
                 color=_TEXT_COLOR,
                 bg_color=_THEME_BG,
-                font_size=2,
+                font_size=1,
                 text=subtitle,
             )
         )

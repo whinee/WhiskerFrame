@@ -53,6 +53,26 @@ examples:
 version:
     @ echo {{app_version}}
 
+# Launch the desktop preview mirror connected to the cyberdeck serial port.
+[unix]
+preview:
+    uv run python scripts/desktop_mirror.py
+
+# Launch the desktop preview mirror in explicit mock/demo mode.
+[unix]
+preview-mock:
+    uv run python scripts/desktop_mirror.py --mock
+
+# Run visual verification and inspection pipeline.
+[unix]
+preview-inspect:
+    uv run python scripts/visual_verify.py
+
+# Stop any running desktop preview mirror processes.
+[unix]
+preview-stop:
+    -pkill -f desktop_mirror.py
+
 # Convert the configured boot-splash image to a 320x240 RGB565 blob (programmer-side).
 [unix]
 splash:

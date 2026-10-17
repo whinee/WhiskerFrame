@@ -36,7 +36,7 @@ def build_multiline(*, inverted: bool) -> DrawText:
     """
     builder = CommandBuilder()
     region = XYWH(x=0, y=0, w=200, h=120)
-    style = TextStyle(color=0xFD20, bg_color=0x0010, font_size=2)  # amber on navy
+    style = TextStyle(color=0xFD20, bg_color=0x0010, font_size=1)  # amber on navy
     return builder.draw_text(
         region,
         _LINES,

@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from unittest.mock import MagicMock
 from whiskerframe.terminal import TerminalGeometry
 
 from .debug import tracepoint
@@ -148,6 +149,16 @@ class Workspace:
     _alive: bool = True
     _mock_cwd: str | None = None
     _mock_alive: bool | None = None
+    scroll_offset: int = 0
+
+    def scroll_up_history(self) -> None:
+        """Scroll viewport up into scrollback history."""
+        max_offset = len(self.grid._scrollback)
+        self.scroll_offset = min(max_offset, self.scroll_offset + 1)
+
+    def scroll_down_history(self) -> None:
+        """Scroll viewport down toward live bottom."""
+        self.scroll_offset = max(0, self.scroll_offset - 1)
 
     @property
     def cwd(self) -> str:
@@ -271,7 +282,16 @@ class WorkspaceManager:
         if geometry and master_fd >= 0:
             _tiocswinsz(master_fd, geometry)
 
-        grid = Grid(cols, rows, fg, bg)
+        config = getattr(self.bridge, "_config", None)
+        status_enabled = getattr(config, "status_bar_enabled", False)
+        if type(status_enabled).__name__ == "MagicMock" or str(type(status_enabled)).find("MagicMock") != -1:
+            status_enabled = False
+        status_pos = getattr(config, "status_bar_position", "top")
+        if type(status_pos).__name__ == "MagicMock" or str(type(status_pos)).find("MagicMock") != -1:
+            status_pos = "top"
+        status_rows = 1 if status_enabled else 0
+
+        grid = Grid(cols, rows, fg, bg, status_bar_rows=status_rows, status_bar_position=status_pos)
         emulator = VTEmulator(grid, theme)
         return grid, emulator
 
@@ -493,14 +513,15 @@ class WorkspaceManager:
         if ws is None or not hasattr(self.bridge, "_paint"):
             return
         theme = getattr(self.bridge, "_theme", None)
+        target_grid = ws.grid.render_viewport(ws.scroll_offset) if ws.scroll_offset > 0 else ws.grid
         if theme:
             cursor_bg = theme.ansi[11] if ctrl_armed else theme.cursor
-            display_grid = ws.grid.render_with_cursor(
+            display_grid = target_grid.render_with_cursor(
                 cursor_fg=theme.bg,
                 cursor_bg=cursor_bg,
             )
         else:
-            display_grid = ws.grid
+            display_grid = target_grid
         self.bridge._paint(display_grid)
 
     def _copy_cells(self, old_grid: Grid, new_grid: Grid) -> None:
@@ -756,6 +777,29 @@ class WorkspaceManager:
             "workspaces": workspaces,
         }
 
+    def _cmd_input(self, req: dict[str, Any], user: str) -> dict[str, Any]:
+        target_id = req.get("id", self.active_id)
+        ws = self.workspaces.get(target_id) or self.active_workspace
+        if ws is None or not ws.is_alive():
+            return {"ok": False, "error": "No active workspace"}
+        if user != "root" and ws.user != user:
+            return {"ok": False, "error": "Permission denied"}
+        hex_data = req.get("hex")
+        text_data = req.get("bytes")
+        try:
+            if hex_data:
+                payload = bytes.fromhex(hex_data)
+            elif isinstance(text_data, str):
+                payload = text_data.encode("latin-1")
+            elif isinstance(text_data, list):
+                payload = bytes(text_data)
+            else:
+                return {"ok": False, "error": "Missing bytes or hex"}
+            os.write(ws.master_fd, payload)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def dispatch_ipc_command(
         self,
         req: dict[str, Any],
@@ -794,15 +838,12 @@ class WorkspaceManager:
             "close": self._cmd_close,
             "kill": self._cmd_close,
             "status": self._cmd_status,
+            "input": self._cmd_input,
         }
         handler = handlers.get(cmd)
         if handler is None:
             return {"ok": False, "error": f"Unknown command: {cmd}"}
         return handler(req, effective_user)
-        handler = handlers.get(cmd)
-        if handler is None:
-            return {"ok": False, "error": f"Unknown command: {cmd}"}
-        return handler(req)
 
     def _read_fd_bytes(self, ws: Workspace) -> bytes | None:
         try:

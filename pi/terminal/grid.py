@@ -95,6 +95,8 @@ class Grid:
         rows: int,
         default_fg: int,
         default_bg: int,
+        status_bar_rows: int = 0,
+        status_bar_position: str = "top",
     ) -> None:
         """
         Initialize a blank grid filled with the default color pair.
@@ -104,6 +106,8 @@ class Grid:
         - rows (`int`): Number of rows (must be >= 1).
         - default_fg (`int`): RGB565 foreground for blank cells.
         - default_bg (`int`): RGB565 background for blank cells.
+        - status_bar_rows (`int`, optional): Number of reserved status bar rows. Defaults to 0.
+        - status_bar_position (`str`, optional): "top" or "bottom". Defaults to "top".
 
         Raises:
         - `ValueError`: If ``cols`` or ``rows`` is less than 1.
@@ -116,7 +120,21 @@ class Grid:
         self.rows = rows
         self.default_fg = default_fg
         self.default_bg = default_bg
-        self.cursor_row = 0
+        self.status_bar_rows = max(0, status_bar_rows)
+        self.status_bar_position = status_bar_position.lower()
+
+        if self.status_bar_rows > 0:
+            if self.status_bar_position == "bottom":
+                self.viewport_top = 0
+                self.viewport_bottom = max(0, rows - 1 - self.status_bar_rows)
+            else:
+                self.viewport_top = min(rows - 1, self.status_bar_rows)
+                self.viewport_bottom = rows - 1
+        else:
+            self.viewport_top = 0
+            self.viewport_bottom = rows - 1
+
+        self.cursor_row = self.viewport_top
         self.cursor_col = 0
         self.dirty: bool = False
         self._wrapped: list[bool] = [False] * rows
@@ -160,31 +178,31 @@ class Grid:
 
     def _in_bounds(self, row: int, col: int) -> bool:
         """
-        Report whether ``(row, col)`` lies inside the grid.
+        Report whether ``(row, col)`` lies inside the grid viewport.
 
         Args:
         - row (`int`): Row index.
         - col (`int`): Column index.
 
         Returns:
-        `bool`: ``True`` if the position is addressable.
+        `bool`: ``True`` if the position is addressable within the viewport.
 
         """
-        return 0 <= row < self.rows and 0 <= col < self.cols
+        return self.viewport_top <= row <= self.viewport_bottom and 0 <= col < self.cols
 
     def set_cursor(self, row: int, col: int) -> None:
         """
-        Move the cursor to ``(row, col)``, clamped to the grid bounds.
+        Move the cursor to ``(row, col)``, clamped to the grid viewport bounds.
 
         Args:
-        - row (`int`): Target row (clamped to ``[0, rows - 1]``).
+        - row (`int`): Target row (clamped to viewport bounds).
         - col (`int`): Target column (clamped to ``[0, cols - 1]``).
 
         Returns:
         `None`: The cursor is updated in place.
 
         """
-        self.cursor_row = max(0, min(row, self.rows - 1))
+        self.cursor_row = max(self.viewport_top, min(row, self.viewport_bottom))
         self.cursor_col = max(0, min(col, self.cols - 1))
 
     def put_char(self, char: str, fg: int, bg: int) -> None:
@@ -214,13 +232,13 @@ class Grid:
 
     def newline(self) -> None:
         """
-        Move the cursor down one row, scrolling up when past the last row.
+        Move the cursor down one row, scrolling up when past the viewport bottom.
 
         Returns:
         `None`: The cursor (and grid, when scrolling) is updated in place.
 
         """
-        if self.cursor_row + 1 >= self.rows:
+        if self.cursor_row + 1 > self.viewport_bottom:
             self.scroll_up(1)
         else:
             self.cursor_row += 1
@@ -263,23 +281,22 @@ class Grid:
 
     def clear(self) -> None:
         """
-        Clear the whole grid to blanks and home the cursor.
+        Clear the viewport to blanks and home the cursor, leaving reserved rows untouched.
 
         Returns:
-        `None`: The grid and cursor are reset in place.
+        `None`: The viewport and cursor are reset in place.
 
         """
-        self._cells = [
-            [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
-        ]
-        self._wrapped = [False] * self.rows
-        self.cursor_row = 0
+        for r in range(self.viewport_top, self.viewport_bottom + 1):
+            self._cells[r] = [self._blank() for _ in range(self.cols)]
+            self._wrapped[r] = False
+        self.cursor_row = self.viewport_top
         self.cursor_col = 0
         self.dirty = True
 
     def clear_line(self, row: int | None = None) -> None:
         """
-        Clear a single row to blanks (the cursor row by default).
+        Clear a single viewport row to blanks (the cursor row by default).
 
         Args:
         - row (`int | None`, optional): Row to clear. Defaults to the cursor row.
@@ -289,7 +306,7 @@ class Grid:
 
         """
         target = self.cursor_row if row is None else row
-        if 0 <= target < self.rows:
+        if self.viewport_top <= target <= self.viewport_bottom:
             self._cells[target] = [self._blank() for _ in range(self.cols)]
             self._wrapped[target] = False
 
@@ -307,82 +324,84 @@ class Grid:
 
     def clear_to_end_of_screen(self) -> None:
         """
-        Clear from the cursor to the end of the grid.
+        Clear from the cursor to the end of the viewport.
 
         Blank the remainder of the cursor row (from the cursor column) and every
-        row below it.
+        row below it within the viewport.
 
         Returns:
         `None`: The affected cells are blanked in place.
 
         """
         self.clear_to_end_of_line()
-        for row in range(self.cursor_row + 1, self.rows):
+        for row in range(self.cursor_row + 1, self.viewport_bottom + 1):
             self._cells[row] = [self._blank() for _ in range(self.cols)]
             self._wrapped[row] = False
 
     def scroll_up(self, n: int = 1) -> None:
         """
-        Scroll the grid up by ``n`` rows, filling the bottom with blanks.
+        Scroll the viewport up by ``n`` rows, filling the bottom with blanks.
 
-        The cursor stays on its current row index (which now shows later
-        content). Scrolling by at least the row count clears the grid.
+        The cursor stays on its current row index. Reserved status bar rows are untouched.
 
         Args:
         - n (`int`, optional): Number of rows to scroll up. Defaults to 1.
 
         Returns:
-        `None`: The grid is shifted in place; non-positive ``n`` is a no-op.
+        `None`: The viewport is shifted in place; non-positive ``n`` is a no-op.
 
         """
+        n = max(0, n)
         if n <= 0:
             return
-        if n >= self.rows:
-            for r in range(self.rows):
+        region_h = self.viewport_bottom - self.viewport_top + 1
+        if n >= region_h:
+            for r in range(self.viewport_top, self.viewport_bottom + 1):
                 self._scrollback.append((self._cells[r], self._wrapped[r]))
             if len(self._scrollback) > self.max_scrollback:
                 self._scrollback = self._scrollback[-self.max_scrollback:]
-            self._cells = [
-                [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
-            ]
-            self._wrapped = [False] * self.rows
+            for r in range(self.viewport_top, self.viewport_bottom + 1):
+                self._cells[r] = [self._blank() for _ in range(self.cols)]
+                self._wrapped[r] = False
             return
-        for r in range(n):
+        for r in range(self.viewport_top, self.viewport_top + n):
             self._scrollback.append((self._cells[r], self._wrapped[r]))
         if len(self._scrollback) > self.max_scrollback:
             self._scrollback = self._scrollback[-self.max_scrollback:]
-        kept = self._cells[n:]
-        kept_wrapped = self._wrapped[n:]
-        blanks = [[self._blank() for _ in range(self.cols)] for _ in range(n)]
-        blanks_wrapped = [False] * n
-        self._cells = kept + blanks
-        self._wrapped = kept_wrapped + blanks_wrapped
+
+        for r in range(self.viewport_top, self.viewport_bottom + 1 - n):
+            self._cells[r] = self._cells[r + n]
+            self._wrapped[r] = self._wrapped[r + n]
+        for r in range(self.viewport_bottom + 1 - n, self.viewport_bottom + 1):
+            self._cells[r] = [self._blank() for _ in range(self.cols)]
+            self._wrapped[r] = False
 
     def scroll_down(self, n: int = 1) -> None:
         """
-        Scroll the grid down by ``n`` rows, filling the top with blanks.
+        Scroll the viewport down by ``n`` rows, filling the top with blanks.
 
         Args:
         - n (`int`, optional): Number of rows to scroll down. Defaults to 1.
 
         Returns:
-        `None`: The grid is shifted in place; non-positive ``n`` is a no-op.
+        `None`: The viewport is shifted in place; non-positive ``n`` is a no-op.
 
         """
+        n = max(0, n)
         if n <= 0:
             return
-        if n >= self.rows:
-            self._cells = [
-                [self._blank() for _ in range(self.cols)] for _ in range(self.rows)
-            ]
-            self._wrapped = [False] * self.rows
+        region_h = self.viewport_bottom - self.viewport_top + 1
+        if n >= region_h:
+            for r in range(self.viewport_top, self.viewport_bottom + 1):
+                self._cells[r] = [self._blank() for _ in range(self.cols)]
+                self._wrapped[r] = False
             return
-        kept = self._cells[: self.rows - n]
-        kept_wrapped = self._wrapped[: self.rows - n]
+        kept = self._cells[self.viewport_top : self.viewport_bottom + 1 - n]
+        kept_wrapped = self._wrapped[self.viewport_top : self.viewport_bottom + 1 - n]
         blanks = [[self._blank() for _ in range(self.cols)] for _ in range(n)]
         blanks_wrapped = [False] * n
-        self._cells = blanks + kept
-        self._wrapped = blanks_wrapped + kept_wrapped
+        self._cells[self.viewport_top : self.viewport_bottom + 1] = blanks + kept
+        self._wrapped[self.viewport_top : self.viewport_bottom + 1] = blanks_wrapped + kept_wrapped
 
     def snapshot(self) -> Grid:
         """
@@ -395,7 +414,14 @@ class Grid:
         `Grid`: An independent copy with identical cells and cursor.
 
         """
-        clone = Grid(self.cols, self.rows, self.default_fg, self.default_bg)
+        clone = Grid(
+            self.cols,
+            self.rows,
+            self.default_fg,
+            self.default_bg,
+            status_bar_rows=self.status_bar_rows,
+            status_bar_position=self.status_bar_position,
+        )
         clone._cells = [[replace(cell) for cell in row] for row in self._cells]
         clone._wrapped = list(self._wrapped)
         clone._scrollback = [(list(row), wrap) for row, wrap in self._scrollback]
@@ -569,7 +595,14 @@ class Grid:
             msg = f"grid dimensions must be >= 1, got cols={new_cols}, rows={new_rows}"
             raise ValueError(msg)
 
-        new_grid = Grid(new_cols, new_rows, self.default_fg, self.default_bg)
+        new_grid = Grid(
+            new_cols,
+            new_rows,
+            self.default_fg,
+            self.default_bg,
+            status_bar_rows=self.status_bar_rows,
+            status_bar_position=self.status_bar_position,
+        )
         new_grid.dirty = True
         new_grid.max_scrollback = self.max_scrollback
 
@@ -693,3 +726,49 @@ class Grid:
             new_grid.cursor_col = min(new_cols - 1, new_cursor_col)
 
         return new_grid
+
+    def render_viewport(self, scroll_offset: int = 0) -> Grid:
+        """
+        Return a temporary Grid instance rendering the viewport with scroll_offset applied.
+        """
+        if scroll_offset <= 0 or not self._scrollback:
+            return self
+
+        clone = Grid(
+            self.cols,
+            self.rows,
+            self.default_fg,
+            self.default_bg,
+            status_bar_rows=self.status_bar_rows,
+            status_bar_position=self.status_bar_position,
+        )
+        clone._scrollback = list(self._scrollback)
+        clone._cells = [list(row) for row in self._cells]
+        clone._wrapped = list(self._wrapped)
+        clone.cursor_row = self.cursor_row
+        clone.cursor_col = self.cursor_col
+
+        vp_top = self.viewport_top
+        vp_bot = self.viewport_bottom
+        vp_height = vp_bot - vp_top + 1
+
+        all_lines = list(self._scrollback) + [(self._cells[r], self._wrapped[r]) for r in range(self.rows)]
+        total_lines = len(all_lines)
+
+        base_start = len(self._scrollback) + vp_top
+        max_offset = len(self._scrollback)
+        offset = max(0, min(max_offset, scroll_offset))
+        start_idx = base_start - offset
+
+        for r in range(vp_height):
+            idx = start_idx + r
+            target_row = vp_top + r
+            if 0 <= idx < total_lines:
+                cells_tuple, wrapped_val = all_lines[idx]
+                clone._cells[target_row] = [Cell(c.char, c.fg, c.bg) for c in cells_tuple]
+                clone._wrapped[target_row] = wrapped_val
+            else:
+                clone._cells[target_row] = [clone._blank() for _ in range(clone.cols)]
+                clone._wrapped[target_row] = False
+
+        return clone

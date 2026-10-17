@@ -42,12 +42,14 @@ from terminal.vt import VTEmulator  # noqa: E402
 
 from whiskerframe.models import DrawRect, DrawText  # noqa: E402
 from whiskerframe.protocol import decode  # noqa: E402
+from whiskerframe.preview import PreviewRenderer  # noqa: E402
 from whiskerframe.terminal import (  # noqa: E402
     DISPLAY_HEIGHT,
     DISPLAY_WIDTH,
     DisplaySleep,
     DrawImage,
     TerminalGeometry,
+    DrawCells,
 )
 
 
@@ -362,6 +364,95 @@ class TestGeometrySwitchingRegression(unittest.TestCase):
 
         # 3. New grid marked dirty
         self.assertTrue(new_grid.dirty)
+
+
+class TestRestoredFontRegression(unittest.TestCase):
+    """
+    Test suite enforcing the restored readable built-in font from October 2, 2026.
+
+    Validates:
+    - render.h does not include custom Comic Mono bitmap font headers (font_*.h).
+    - render.h uses native TFT_eSPI tft.drawString for cell rendering.
+    - No Comic Mono font files or generator scripts exist in the repository.
+    """
+
+    def test_render_h_uses_builtin_font_and_no_custom_font_includes(self) -> None:
+        render_h_path = REPO_ROOT / "firmware/cyd_display_link/render.h"
+        self.assertTrue(render_h_path.is_file())
+        content = render_h_path.read_text(encoding="utf-8")
+
+        # Must not include font headers
+        self.assertNotIn("font_6x8.h", content)
+        self.assertNotIn("font_8x12.h", content)
+        self.assertNotIn("font_12x16.h", content)
+        self.assertNotIn("font_18x24.h", content)
+        self.assertNotIn("glyph_6x8_bitmap", content)
+
+        # Must use tft.drawString for cells (October 2 reference behavior)
+        self.assertIn("tft.drawString(ch", content)
+
+    def test_no_comic_mono_artifacts_present(self) -> None:
+        forbidden_paths = [
+            REPO_ROOT / "assets/fonts/ComicMono.ttf",
+            REPO_ROOT / "scripts/generate_comic_mono_fonts.py",
+            REPO_ROOT / "firmware/cyd_display_link/font_6x8.h",
+            REPO_ROOT / "firmware/cyd_display_link/font_8x12.h",
+            REPO_ROOT / "firmware/cyd_display_link/font_12x16.h",
+            REPO_ROOT / "firmware/cyd_display_link/font_18x24.h",
+        ]
+        for p in forbidden_paths:
+            self.assertFalse(p.exists(), f"Forbidden Comic Mono artifact still exists: {p}")
+
+
+class TestGeometryParity(unittest.TestCase):
+    """
+    Test suite for font scaling, layout, and preview parity across all 3 supported geometries
+    (53x30, 40x20, 17x10).
+
+    Distinguishes simulated desktop preview (Pillow-based reconstruction) from
+    physical ILI9341 hardware execution.
+    """
+
+    def test_geometries_desktop_preview_rendering(self) -> None:
+        """Simulate desktop preview rendering across all 3 geometries with representative terminal content."""
+        geometries = [
+            (1, 53, 30, 6, 8),
+            (5, 40, 20, 8, 12),
+            (3, 17, 10, 18, 24),
+        ]
+
+        renderer = PreviewRenderer(width=320, height=240, background=0x0000)
+        representative_content = [
+            "Punctuation: !@#$%^&*()_+{}[]|;:,.<>?/",
+            "Lowercase: abcdefghijklmnopqrstuvwxyz 0123456789",
+            "Status: [OK] WS1:bash BAT:95% CPU:42C",
+            "Multiline:\nLine 1: init\nLine 2: ready\nLine 3: active",
+        ]
+
+        for font_size, exp_cols, exp_rows, exp_w, exp_h in geometries:
+            geom = TerminalGeometry.for_font_size(font_size)
+            self.assertEqual(geom.cols, exp_cols)
+            self.assertEqual(geom.rows, exp_rows)
+            self.assertEqual(geom.cell_w, exp_w)
+            self.assertEqual(geom.cell_h, exp_h)
+
+            commands = []
+            for r, text in enumerate(representative_content):
+                if r < exp_rows:
+                    commands.append(
+                        DrawCells(
+                            col=0,
+                            row=r,
+                            fg=0xFFFF,
+                            bg=0x0000,
+                            font_size=font_size,
+                            text=text[:exp_cols],
+                        )
+                    )
+
+            # Simulated preview (Pillow-based host reconstruction)
+            img = renderer.render(commands)
+            self.assertEqual(img.size, (320, 240))
 
 
 if __name__ == "__main__":

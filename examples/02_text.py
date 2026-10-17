@@ -30,7 +30,7 @@ def build_text() -> DrawText:
     """
     builder = CommandBuilder()
     region = XYWH(x=0, y=0, w=200, h=80)
-    style = TextStyle(color=0x07FF, font_size=2)  # cyan (RGB565), size 2
+    style = TextStyle(color=0x07FF, font_size=1)  # cyan (RGB565), size 1
     return builder.draw_text(region, "Meow", anchor="mm", style=style)
 
 

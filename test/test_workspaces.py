@@ -72,7 +72,7 @@ class TestWorkspaceManagerCore(unittest.TestCase):
 
     def setUp(self) -> None:
         self.theme = load_theme(None)
-        self.geometry = TerminalGeometry.for_font_size(2)
+        self.geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = self.theme
         self.mock_bridge._geometry = self.geometry
@@ -207,7 +207,7 @@ class TestWorkspaceIPCAndClient(unittest.TestCase):
 
     def setUp(self) -> None:
         self.theme = load_theme(None)
-        self.geometry = TerminalGeometry.for_font_size(2)
+        self.geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = self.theme
         self.mock_bridge._geometry = self.geometry
@@ -284,7 +284,7 @@ class TestBridgeWorkspaceChordsAndIntegration(unittest.TestCase):
 
     def setUp(self) -> None:
         self.theme = load_theme(None)
-        self.geometry = TerminalGeometry.for_font_size(2)
+        self.geometry = TerminalGeometry.for_font_size(1)
         self.mock_bridge = MagicMock(spec=TerminalBridge)
         self.mock_bridge._theme = self.theme
         self.mock_bridge._geometry = self.geometry

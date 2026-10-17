@@ -1,31 +1,31 @@
 """
-Compact status bar for the WhiskerFrame cyberdeck terminal.
+Configurable status bar subsystem for the WhiskerFrame cyberdeck terminal.
 
-Renders system telemetry into a dedicated terminal row without causing full-screen
-redraw flicker. Displays:
-1. Active workspace identifier (e.g. [1], [ws1])
-2. Wi-Fi status (SSID, signal strength %, connection state)
-3. Battery status from INA219 (voltage, %, charge/discharge status)
-4. CardKB sticky Ctrl modifier latch state (Fn+Tab indicator, highlighted in yellow)
+Inspired by i3status/i3bar modular configuration and read-only data providers,
+adapted to CYD hardware constraints.
+
+Displays independently configurable modules (workspace, Wi-Fi, battery from INA219,
+mobile/LTE, disk usage, host-link health, current time/date, CardKB sticky Ctrl latch)
+driven by context-sensitive profiles (login, root, neko, default) with access control.
 
 Anti-Flicker Architecture:
-The status bar writes strictly to its designated row in the terminal Grid (by default
-row 0, or the bottom row). When Grid.diff(prev_grid) computes the screen update:
+The status bar writes strictly to its designated row in the terminal Grid (row 0
+or bottom row). When Grid.diff(prev_grid) computes the screen update:
 - Unchanged terminal rows yield 0 draw runs.
 - If status telemetry has not changed, 0 draw runs are emitted for the status row.
-- When telemetry changes, only the modified cells in the status bar row are coalesced
-  into a single compact DRAW_CELLS command (18-69 bytes over serial).
-- The full panel is NEVER cleared (_clear_panel is not called), completely eliminating
-  visual redraw flicker.
+- When telemetry changes, only modified cells are coalesced into a single compact DRAW_CELLS command.
+- The full panel is never cleared, completely eliminating visual redraw flicker.
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,13 +37,19 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BatteryInfo",
+    "DiskInfo",
+    "HostLinkInfo",
+    "MobileInfo",
     "StatusBar",
     "WifiInfo",
     "read_battery_telemetry",
+    "read_disk_telemetry",
+    "read_mobile_telemetry",
     "read_wifi_telemetry",
 ]
 
 _DEFAULT_BATTERY_DIR = Path("/run/battery_monitor")
+_DEFAULT_STATUS_BG = 0x24E9  # Off-blurple derived from blurple bg 0x18C5
 
 
 @dataclass(frozen=True)
@@ -69,18 +75,38 @@ class WifiInfo:
     connected: bool
 
 
+@dataclass(frozen=True)
+class MobileInfo:
+    """Resolved mobile/LTE signal telemetry."""
+
+    signal: int | None
+    connected: bool
+    carrier: str | None
+
+
+@dataclass(frozen=True)
+class DiskInfo:
+    """Resolved disk usage telemetry."""
+
+    percent: int
+    free_gb: float
+    total_gb: float
+
+
+@dataclass(frozen=True)
+class HostLinkInfo:
+    """Resolved host-link / heartbeat health status."""
+
+    status: str  # "OK", "SYNC", "DEGRADED"
+    last_seen_age_s: float
+
+
 def read_battery_telemetry(run_dir: Path | str = _DEFAULT_BATTERY_DIR) -> BatteryInfo:
     """
     Read battery telemetry from /run/battery_monitor/status.json or uevent mirror.
 
     Safe and total: returns BatteryInfo(None, None, "Unknown") on any missing file
     or parse error. Never raises an exception.
-
-    Args:
-    - run_dir (`Path | str`, optional): Path to battery monitor run directory.
-
-    Returns:
-    `BatteryInfo`: Resolved battery percentage, bus voltage, and charge state.
     """
     path = Path(run_dir)
     json_path = path / "status.json"
@@ -99,7 +125,6 @@ def read_battery_telemetry(run_dir: Path | str = _DEFAULT_BATTERY_DIR) -> Batter
         except (OSError, ValueError, TypeError):
             pass
 
-    # Fallback: check kernel-style uevent mirror
     uevent_path = path / "uevent"
     if uevent_path.is_file():
         try:
@@ -112,7 +137,6 @@ def read_battery_telemetry(run_dir: Path | str = _DEFAULT_BATTERY_DIR) -> Batter
                     if line.startswith("POWER_SUPPLY_CAPACITY="):
                         pct_val = int(line.split("=", 1)[1])
                     elif line.startswith("POWER_SUPPLY_VOLTAGE_NOW="):
-                        # microvolts to volts
                         volt_val = round(int(line.split("=", 1)[1]) / 1_000_000.0, 2)
                     elif line.startswith("POWER_SUPPLY_STATUS="):
                         st_val = line.split("=", 1)[1]
@@ -124,13 +148,7 @@ def read_battery_telemetry(run_dir: Path | str = _DEFAULT_BATTERY_DIR) -> Batter
 
 
 def read_wifi_telemetry() -> WifiInfo:
-    """
-    Read active Wi-Fi telemetry using nmcli or cache file with safe fallback.
-
-    Returns:
-    `WifiInfo`: Resolved SSID, signal strength %, and connection flag.
-    """
-    # 1. Try quick nmcli device status
+    """Read active Wi-Fi telemetry using nmcli or cache file with safe fallback."""
     try:
         res = subprocess.run(  # noqa: S603, S607
             ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev"],
@@ -144,13 +162,11 @@ def read_wifi_telemetry() -> WifiInfo:
                 parts = line.strip().split(":")
                 if len(parts) >= 4 and parts[1] == "wifi" and parts[2] == "connected":
                     active_conn = parts[3]
-                    # Query signal strength for active connection
                     sig = _read_active_wifi_signal()
                     return WifiInfo(ssid=active_conn, signal=sig, connected=True)
     except (OSError, subprocess.SubprocessError):
         pass
 
-    # 2. Check /tmp/wifi-scan.json cache if present
     cache_path = Path("/tmp/wifi-scan.json")  # noqa: S108
     if cache_path.is_file():
         try:
@@ -171,7 +187,6 @@ def read_wifi_telemetry() -> WifiInfo:
 
 
 def _read_active_wifi_signal() -> int | None:
-    """Helper to query signal strength % of currently active Wi-Fi AP."""
     try:
         res = subprocess.run(  # noqa: S603, S607
             ["nmcli", "-t", "-f", "IN-USE,SIGNAL", "dev", "wifi"],
@@ -191,18 +206,41 @@ def _read_active_wifi_signal() -> int | None:
     return None
 
 
+def read_mobile_telemetry() -> MobileInfo:
+    """Read mobile/LTE signal telemetry with safe fallback if absent."""
+    modem_status = Path("/run/modem/status.json")
+    if modem_status.is_file():
+        try:
+            with open(modem_status, encoding="utf-8") as f:
+                data = json.load(f)
+            return MobileInfo(
+                signal=int(data.get("signal", 0)),
+                connected=bool(data.get("connected", False)),
+                carrier=str(data.get("carrier", "LTE")),
+            )
+        except (OSError, ValueError):
+            pass
+    return MobileInfo(signal=None, connected=False, carrier=None)
+
+
+def read_disk_telemetry(path: str = "/") -> DiskInfo:
+    """Read disk usage telemetry safely using shutil.disk_usage."""
+    try:
+        usage = shutil.disk_usage(path)
+        total_gb = round(usage.total / (1024 ** 3), 1)
+        free_gb = round(usage.free / (1024 ** 3), 1)
+        used_pct = int((usage.used / usage.total) * 100) if usage.total > 0 else 0
+        return DiskInfo(percent=used_pct, free_gb=free_gb, total_gb=total_gb)
+    except OSError:
+        return DiskInfo(percent=0, free_gb=0.0, total_gb=0.0)
+
+
 class StatusBar:
     """
-    Compact status bar maintaining system telemetry and rendering to a Grid.
+    Configurable status bar maintaining system telemetry and rendering to a Grid.
 
-    Attributes:
-    - workspace (`str | int`): Current workspace identifier.
-    - wifi (`WifiInfo`): Current Wi-Fi telemetry.
-    - battery (`BatteryInfo`): Current battery telemetry from INA219.
-    - ctrl_latch (`bool`): Whether CardKB sticky Ctrl modifier latch is armed.
-    - position (`str`): "top" (row 0) or "bottom" (row `rows - 1`).
-    - row (`int | None`): Explicit row index override.
-    - theme (`Theme`): The active color theme.
+    Supports multiple modules, ordering, profile-based access control (login, root, neko),
+    and responsive geometry adaptation.
     """
 
     def __init__(
@@ -212,25 +250,29 @@ class StatusBar:
         position: str = "top",
         row: int | None = None,
         enabled: bool = True,
+        profile: str = "default",
+        user: str = "root",
+        config: dict[str, Any] | None = None,
     ) -> None:
-        """
-        Initialize the status bar with optional custom configuration.
-
-        Args:
-        - theme (`Theme | None`, optional): RGB565 theme. Defaults to load_theme().
-        - workspace (`str | int`, optional): Starting workspace. Defaults to 1.
-        - position (`str`, optional): "top" or "bottom". Defaults to "top".
-        - row (`int | None`, optional): Explicit target row index.
-        - enabled (`bool`, optional): Master enable toggle. Defaults to True.
-        """
         self.theme: Theme = theme if theme is not None else load_theme(None)
         self.workspace: str | int = workspace
         self.position: str = position.lower()
         self.row: int | None = row
         self.enabled: bool = enabled
+        self.profile: str = profile.lower()
+        self.user: str = user
+        self._config = config or {}
+
+        # Resolve status bar theme background from config or default off-blurple
+        sb_cfg = self._config.get("terminal", {}).get("status_bar", {}) if isinstance(self._config, dict) else {}
+        raw_bg = sb_cfg.get("theme_bg", _DEFAULT_STATUS_BG)
+        self.status_bg: int = int(raw_bg, 0) if isinstance(raw_bg, str) else int(raw_bg)
 
         self.wifi: WifiInfo = WifiInfo(ssid=None, signal=None, connected=False)
+        self.mobile: MobileInfo = MobileInfo(signal=None, connected=False, carrier=None)
         self.battery: BatteryInfo = BatteryInfo(percent=None, voltage=None, status="Unknown")
+        self.disk: DiskInfo = DiskInfo(percent=0, free_gb=0.0, total_gb=0.0)
+        self.host_link: HostLinkInfo = HostLinkInfo(status="OK", last_seen_age_s=0.0)
         self.ctrl_latch: bool = False
 
         self._dirty: bool = True
@@ -238,24 +280,16 @@ class StatusBar:
 
     @property
     def dirty(self) -> bool:
-        """Report whether telemetry has mutated since last render."""
         return self._dirty
 
     def set_workspace(self, ws: str | int) -> bool:
-        """Update active workspace. Returns True if value changed."""
         if self.workspace != ws:
             self.workspace = ws
             self._dirty = True
             return True
         return False
 
-    def set_wifi(
-        self,
-        ssid: str | None,
-        signal: int | None = None,
-        connected: bool = True,
-    ) -> bool:
-        """Update Wi-Fi telemetry manually. Returns True if changed."""
+    def set_wifi(self, ssid: str | None, signal: int | None = None, connected: bool = True) -> bool:
         new_info = WifiInfo(ssid=ssid, signal=signal, connected=connected)
         if self.wifi != new_info:
             self.wifi = new_info
@@ -263,13 +297,7 @@ class StatusBar:
             return True
         return False
 
-    def set_battery(
-        self,
-        percent: int | None,
-        voltage: float | None = None,
-        status: str = "Discharging",
-    ) -> bool:
-        """Update battery telemetry manually. Returns True if changed."""
+    def set_battery(self, percent: int | None, voltage: float | None = None, status: str = "Discharging") -> bool:
         new_info = BatteryInfo(percent=percent, voltage=voltage, status=status)
         if self.battery != new_info:
             self.battery = new_info
@@ -278,23 +306,13 @@ class StatusBar:
         return False
 
     def set_ctrl_latch(self, armed: bool) -> bool:
-        """Update sticky Ctrl latch modifier state. Returns True if changed."""
         if self.ctrl_latch != armed:
             self.ctrl_latch = armed
             self._dirty = True
             return True
         return False
 
-    def refresh_telemetry(
-        self,
-        battery_dir: Path | str = _DEFAULT_BATTERY_DIR,
-    ) -> bool:
-        """
-        Poll battery and Wi-Fi telemetry from system mirrors.
-
-        Returns:
-        `bool`: True if any field changed.
-        """
+    def refresh_telemetry(self, battery_dir: Path | str = _DEFAULT_BATTERY_DIR) -> bool:
         changed = False
         new_bat = read_battery_telemetry(battery_dir)
         if self.battery != new_bat:
@@ -306,170 +324,137 @@ class StatusBar:
             self.wifi = new_wifi
             changed = True
 
+        new_mobile = read_mobile_telemetry()
+        if self.mobile != new_mobile:
+            self.mobile = new_mobile
+            changed = True
+
+        new_disk = read_disk_telemetry()
+        if self.disk != new_disk:
+            self.disk = new_disk
+            changed = True
+
         if changed:
             self._dirty = True
         return changed
 
     def target_row(self, grid: Grid) -> int:
-        """Resolve the 0-indexed row on the target grid for this status bar."""
         if self.row is not None:
             return max(0, min(self.row, grid.rows - 1))
         if self.position == "bottom":
             return max(0, grid.rows - 1)
-        return 0  # top
+        return 0
+
+    def _get_profile_modules(self) -> list[str]:
+        """Resolve modules for active profile with access control enforcement."""
+        terminal_cfg = self._config.get("terminal", {}) if isinstance(self._config, dict) else {}
+        sb_cfg = terminal_cfg.get("status_bar", {}) if isinstance(terminal_cfg, dict) else {}
+        profiles = sb_cfg.get("profiles", {}) if isinstance(sb_cfg, dict) else {}
+
+        profile_data = profiles.get(self.profile) or profiles.get("default") or {}
+        modules = profile_data.get("order") or profile_data.get("modules") or ["workspace", "wifi", "battery", "time", "ctrl_latch"]
+
+        # Access control enforcement: non-root users or login profile cannot access privileged modules
+        is_root = (self.user == "root" and self.profile != "login")
+        privileged_modules = {"disk"}
+
+        filtered = []
+        for mod in modules:
+            if mod in privileged_modules and not is_root:
+                continue
+            if self.profile == "login" and mod in {"workspace", "ctrl_latch"}:
+                continue
+            filtered.append(mod)
+        return filtered
 
     def format_status(self, cols: int) -> str:
         """
-        Format a single-line compact status string strictly constrained to cols width.
-
-        Adapts dynamically to the active terminal geometry:
-        - cols >= 48 (53x30 geometry): Full details with voltages and full labels.
-        - cols >= 35 (40x20 geometry): Compact labels with voltage and signal.
-        - cols >= 22 (26x15 geometry): Ultra-compact badges.
-        - cols < 22  (17x10 geometry): Minimalist short codes.
-
-        Args:
-        - cols (`int`): Target column width.
-
-        Returns:
-        `str`: Formatted status string padded with trailing spaces to exactly cols.
+        Format modules into a single-line compact status string strictly constrained to cols width,
+        adhering to the active profile's module order and geometry constraints.
         """
-        ws_str = f"[{self.workspace}]"
+        modules = self._get_profile_modules()
+        parts: list[str] = []
 
-        # Format Wi-Fi badge
-        if self.wifi.connected and self.wifi.ssid:
-            raw_ssid = self.wifi.ssid
-            sig = f"{self.wifi.signal}%" if self.wifi.signal is not None else ""
-            if cols >= 48:
-                ssid_disp = raw_ssid[:12] + "~" if len(raw_ssid) > 13 else raw_ssid
-                wifi_badge = f"WiFi:{ssid_disp} {sig}".strip()
-            elif cols >= 35:
-                ssid_disp = raw_ssid[:8] + "~" if len(raw_ssid) > 9 else raw_ssid
-                wifi_badge = f"{ssid_disp} {sig}".strip()
-            elif cols >= 22:
-                ssid_disp = raw_ssid[:6] + "~" if len(raw_ssid) > 7 else raw_ssid
-                wifi_badge = ssid_disp
-            else:
-                wifi_badge = "WiFi"
-        else:
-            wifi_badge = "WiFi:--" if cols >= 35 else "--"
-
-        # Format Battery badge
-        if self.battery.percent is not None:
-            pct_str = f"{self.battery.percent}%"
-            chg_char = "+" if self.battery.is_charging else ""
-            if cols >= 48 and self.battery.voltage is not None:
-                bat_badge = f"Bat:{self.battery.voltage:.1f}V {pct_str}{chg_char}"
-            elif cols >= 35 and self.battery.voltage is not None:
-                bat_badge = f"{self.battery.voltage:.1f}V {pct_str}{chg_char}"
-            else:
-                bat_badge = f"{pct_str}{chg_char}"
-        else:
-            bat_badge = "Bat:--" if cols >= 35 else "BAT"
-
-        # Format Ctrl latch badge
-        ctrl_badge = "[CTRL]" if self.ctrl_latch else ""
-        if cols < 35 and self.ctrl_latch:
-            ctrl_badge = "[^]"
-
-        # Assemble responsive layout
-        if cols >= 48:
-            # 53 columns: [1]  WiFi:SSID 77%  Bat:12.4V 95%  [CTRL]
-            core = f"{ws_str}  {wifi_badge}  {bat_badge}"
-            if ctrl_badge:
-                pad_needed = cols - len(core) - len(ctrl_badge) - 1
-                if pad_needed > 0:
-                    raw = f"{core}{' ' * pad_needed}{ctrl_badge}"
+        for mod in modules:
+            if mod == "workspace":
+                parts.append(f"[{self.workspace}]")
+            elif mod == "wifi":
+                if self.wifi.connected and self.wifi.ssid:
+                    sig = f"{self.wifi.signal}%" if self.wifi.signal is not None else ""
+                    if cols >= 48:
+                        ssid_disp = self.wifi.ssid[:10] + "~" if len(self.wifi.ssid) > 11 else self.wifi.ssid
+                        parts.append(f"WiFi:{ssid_disp} {sig}".strip())
+                    elif cols >= 35:
+                        ssid_disp = self.wifi.ssid[:6] + "~" if len(self.wifi.ssid) > 7 else self.wifi.ssid
+                        parts.append(f"{ssid_disp} {sig}".strip())
+                    else:
+                        parts.append(self.wifi.ssid[:5])
                 else:
-                    raw = f"{core} {ctrl_badge}"
-            else:
-                raw = core
-        elif cols >= 35:
-            # 40 columns: [1] SSID 77% | 12.4V 95% [^]
-            core = f"{ws_str} {wifi_badge} | {bat_badge}"
-            if ctrl_badge:
-                pad_needed = cols - len(core) - len(ctrl_badge) - 1
-                if pad_needed > 0:
-                    raw = f"{core}{' ' * pad_needed}{ctrl_badge}"
+                    parts.append("WiFi:--" if cols >= 35 else "WIFI")
+            elif mod == "battery":
+                if self.battery.percent is not None:
+                    pct = f"{self.battery.percent}%"
+                    chg = "+" if self.battery.is_charging else ""
+                    if cols >= 48 and self.battery.voltage is not None:
+                        parts.append(f"Bat:{self.battery.voltage:.1f}V {pct}{chg}")
+                    elif cols >= 35 and self.battery.voltage is not None:
+                        parts.append(f"{self.battery.voltage:.1f}V {pct}{chg}")
+                    else:
+                        parts.append(f"{pct}{chg}")
                 else:
-                    raw = f"{core} {ctrl_badge}"
-            else:
-                raw = core
-        elif cols >= 22:
-            # 26 columns: [1] SSID | 95% [^]
-            core = f"{ws_str} {wifi_badge} | {bat_badge}"
-            if ctrl_badge:
-                pad_needed = cols - len(core) - len(ctrl_badge) - 1
-                if pad_needed > 0:
-                    raw = f"{core}{' ' * pad_needed}{ctrl_badge}"
-                else:
-                    raw = f"{core} {ctrl_badge}"
-            else:
-                raw = core
-        else:
-            # 17 columns: 1|WiFi|95%|^
-            w_short = str(self.workspace)[:1]
-            ctrl_short = "^" if self.ctrl_latch else ""
-            raw = f"{w_short}|{wifi_badge[:4]}|{bat_badge[:4]}|{ctrl_short}".rstrip("|")
+                    parts.append("Bat:--" if cols >= 35 else "BAT")
+            elif mod == "disk":
+                if cols >= 48:
+                    parts.append(f"Disk:{self.disk.percent}%({self.disk.free_gb}G)")
+                elif cols >= 35:
+                    parts.append(f"Dsk:{self.disk.percent}%")
+            elif mod == "host_link":
+                parts.append("LINK:OK" if cols >= 48 else "OK")
+            elif mod == "time":
+                now_str = datetime.datetime.now().strftime("%H:%M" if cols < 48 else "%b %d %H:%M")
+                parts.append(now_str)
+            elif mod == "ctrl_latch":
+                if self.ctrl_latch:
+                    parts.append("[CTRL]" if cols >= 35 else "[^]")
 
-        # Constrain to exactly cols
-        truncated = raw[:cols]
-        padded = truncated.ljust(cols, " ")
+        # Assemble with separators
+        raw = "  ".join(parts)
+        if len(raw) > cols:
+            # Drop least essential parts from the middle if width exceeded
+            raw = " | ".join(parts[:2])
+
+        padded = raw[:cols].ljust(cols, " ")
         self._last_formatted = padded
         return padded
 
     def render_to_grid(self, grid: Grid, row: int | None = None) -> bool:
-        """
-        Render the status bar into the designated row of the target grid.
-
-        Anti-Flicker Guarantee:
-        Mutates ONLY grid._cells[target_row] and touches no other cells. When
-        grid.diff(prev_grid) is invoked, only this single row produces CellRun
-        commands. If the status bar content is unchanged, 0 runs are emitted.
-
-        Args:
-        - grid (`Grid`): Target terminal grid.
-        - row (`int | None`, optional): Row override. Defaults to configured row.
-
-        Returns:
-        `bool`: True if rendered, False if disabled.
-        """
         if not self.enabled:
             return False
 
         target_row = self.target_row(grid) if row is None else max(0, min(row, grid.rows - 1))
         text = self.format_status(grid.cols)
 
-        # Style colors:
-        # Background: dark slate / dark accent (theme.ansi[8] or high-contrast theme.bg)
-        status_bg = self.theme.ansi[8]  # bright black / dark charcoal
+        status_bg = self.status_bg
         default_fg = self.theme.fg
 
-        # Specific badge color overrides
-        wifi_color = self.theme.ansi[10] if self.wifi.connected else self.theme.ansi[1]  # green / red
-        ctrl_color = self.theme.ansi[11]  # bright yellow (matches yellow cursor / #ffe08a)
+        wifi_color = self.theme.ansi[10] if self.wifi.connected else self.theme.ansi[1]
+        ctrl_color = self.theme.ansi[11]
         ctrl_bg = self.theme.ansi[3] if self.ctrl_latch else status_bg
 
-        # Battery color thresholds
-        bat_color = self.theme.ansi[10]  # default green
+        bat_color = self.theme.ansi[10]
         if self.battery.percent is not None:
             if self.battery.percent < 20:
-                bat_color = self.theme.ansi[9]  # bright red
+                bat_color = self.theme.ansi[9]
             elif self.battery.percent < 45:
-                bat_color = self.theme.ansi[11]  # bright yellow
+                bat_color = self.theme.ansi[11]
             elif self.battery.is_charging:
-                bat_color = self.theme.ansi[14]  # bright cyan for charging
+                bat_color = self.theme.ansi[14]
 
-        # Write each character with appropriate section coloring
         in_ctrl = False
-        in_bat = False
-        in_wifi = False
-
         for col, char in enumerate(text):
             fg = default_fg
             bg = status_bg
 
-            # Determine semantic section for per-field color coding
             tail = text[col:]
             if tail.startswith("[CTRL]") or tail.startswith("[^]"):
                 in_ctrl = True
@@ -488,8 +473,7 @@ class StatusBar:
             elif "%" in tail[:6] or "Bat:" in text[: col + 4] or "V " in text[: col + 4]:
                 fg = bat_color
             elif col < 4:
-                # Workspace badge highlight
-                fg = self.theme.ansi[13]  # bright magenta / pink
+                fg = self.theme.ansi[13]
 
             grid._cells[target_row][col] = Cell(char=char, fg=fg, bg=bg)
 

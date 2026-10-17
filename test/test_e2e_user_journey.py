@@ -223,7 +223,7 @@ class TestEndToEndUserJourney:
         # ---------------------------------------------------------------------
         mock_bridge = MagicMock()
         mock_bridge._theme = theme
-        mock_bridge._geometry = TerminalGeometry.for_font_size(2)
+        mock_bridge._geometry = TerminalGeometry.for_font_size(1)
         mock_bridge._paint = MagicMock()
         mock_bridge._prev = None
 

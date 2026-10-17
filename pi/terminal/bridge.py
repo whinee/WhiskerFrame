@@ -33,6 +33,7 @@ import pty
 import queue
 import select
 import signal
+import socket
 import struct
 import termios
 import threading
@@ -118,14 +119,14 @@ Fn layer maps Del to 139 (0x8B); it is on the Fn layer so it never collides with
 a shell keystroke, and unlike Shift+Del (0x7F) it does not alias Backspace.
 """
 
-RESIZE_SIZES: tuple[int, ...] = (1, 5, 2, 3)
-"""Font sizes the resize chord cycles through (grid 53x30 / 40x20 / 26x15 / 17x10)."""
+RESIZE_SIZES: tuple[int, ...] = (1, 5, 3)
+"""Font sizes the resize chord cycles through (grid 53x30 / 40x20 / 17x10)."""
 
 _SERIAL_BACKOFF_START_S: float = 0.5
 _SERIAL_BACKOFF_MAX_S: float = 5.0
 _POLL_TIMEOUT_S: float = 0.05
 _PTY_READ_BYTES: int = 4096
-_DEFAULT_FONT_SIZE: int = 2
+_DEFAULT_FONT_SIZE: int = 1
 _DEFAULT_KEYFRAME_S: float = 30.0
 _SHELL_STARTUP_MAX_S: float = 3.0
 """Hard ceiling on draining a new shell's startup output before the first paint."""
@@ -138,8 +139,6 @@ _KEY_LEFT: int = 0xB4
 _KEY_RIGHT: int = 0xB7
 
 _KEY_TRANSLATIONS: dict[int, bytes] = {
-    _KEY_UP: b"\x1b[A",
-    _KEY_DOWN: b"\x1b[B",
     _KEY_RIGHT: b"\x1b[C",
     _KEY_LEFT: b"\x1b[D",
     0x0D: b"\r",
@@ -299,6 +298,78 @@ class TerminalBridge:
         self._serial_backoff = _SERIAL_BACKOFF_START_S
         self._prev: Grid | None = None
         self._cardkb = cardkb
+        self._mirror_socket_path = "/tmp/whiskerframe_mirror.sock"
+        self._mirror_clients: list[socket.socket] = []
+        self._mirror_lock = threading.Lock()
+        self._start_mirror_server()
+
+    def _start_mirror_server(self) -> None:
+        def server_loop() -> None:
+            try:
+                if os.path.exists(self._mirror_socket_path):
+                    os.unlink(self._mirror_socket_path)
+                server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                server.bind(self._mirror_socket_path)
+                os.chmod(self._mirror_socket_path, 0o777)
+                server.listen(5)
+                while True:
+                    try:
+                        conn, _ = server.accept()
+                        with self._mirror_lock:
+                            self._mirror_clients.append(conn)
+                            self._send_snapshot_to_client(conn)
+                    except Exception:
+                        break
+            except Exception:
+                pass
+
+        t = threading.Thread(target=server_loop, daemon=True)
+        t.start()
+
+    def _send_snapshot_to_client(self, conn: socket.socket) -> None:
+        try:
+            clear = DrawRect(
+                x=0,
+                y=0,
+                w=DISPLAY_WIDTH,
+                h=DISPLAY_HEIGHT,
+                color=self._theme.bg,
+                filled=True,
+            )
+            conn.sendall(serialize(clear))
+            grid_to_paint = self._prev
+            if grid_to_paint is None and hasattr(self, "_grid") and self._grid is not None:
+                grid_to_paint = self._grid
+            if grid_to_paint is not None:
+                runs = grid_to_paint.full_repaint()
+                for run in runs:
+                    command = DrawCells(
+                        col=run.col,
+                        row=run.row,
+                        fg=run.fg,
+                        bg=run.bg,
+                        font_size=self._font_size,
+                        text=run.text,
+                    )
+                    conn.sendall(serialize(command))
+        except Exception:
+            pass
+
+    def _broadcast_mirror(self, frame: bytes) -> None:
+        with self._mirror_lock:
+            dead = []
+            for conn in self._mirror_clients:
+                try:
+                    conn.sendall(frame)
+                except Exception:
+                    dead.append(conn)
+            for d in dead:
+                try:
+                    d.close()
+                except Exception:
+                    pass
+                if d in self._mirror_clients:
+                    self._mirror_clients.remove(d)
 
     def set_ctrl_led(self, armed: bool) -> None:
         """
@@ -388,6 +459,7 @@ class TerminalBridge:
         closed for reopen).
 
         """
+        self._broadcast_mirror(frame)
         transport = self._ensure_serial()
         if transport is None:
             return False
@@ -508,9 +580,17 @@ class TerminalBridge:
         self._render_login_screen(state, "")
         tracepoint("terminal.login", status="shown", users=len(state.users))
         while True:
-            key = keys.get_blocking()
+            try:
+                key = keys._queue.get(timeout=15.0)
+            except queue.Empty:
+                key = -1
+
             if key is None:
                 return None
+            if key == -1:
+                # Periodic heartbeat at login screen: re-render to update CYD last_packet_time
+                self._render_login_screen(state, "")
+                continue
             if key in RESIZE_CHORDS:
                 self._rebuild_geometry()
                 self._render_login_screen(state, "")
@@ -823,13 +903,6 @@ class _ShellSession:
         self._master_fd = master_fd
         self._keys = keys
         self._user = user
-        self._grid = Grid(
-            bridge._geometry.cols,
-            bridge._geometry.rows,
-            bridge._theme.fg,
-            bridge._theme.bg,
-        )
-        self._emulator = VTEmulator(self._grid, bridge._theme)
         self._last_keyframe = time.monotonic()
         self._ctrl_armed: bool = False
         self._ctrl_armed_at: float = 0.0
@@ -845,6 +918,18 @@ class _ShellSession:
                 )
             else:
                 self._status_bar = None
+
+        status_rows = 1 if self._status_bar is not None and self._status_bar.enabled else 0
+        status_pos = self._status_bar.position if self._status_bar is not None else "top"
+        self._grid = Grid(
+            bridge._geometry.cols,
+            bridge._geometry.rows,
+            bridge._theme.fg,
+            bridge._theme.bg,
+            status_bar_rows=status_rows,
+            status_bar_position=status_pos,
+        )
+        self._emulator = VTEmulator(self._grid, bridge._theme)
 
         self._workspaces = WorkspaceManager(
             bridge=bridge,
@@ -1110,9 +1195,25 @@ class _ShellSession:
             self._arm_ctrl()
         return True
 
+    def _handle_scroll_chord(self, key: int) -> bool | None:
+        ws = self._workspaces.active_workspace if hasattr(self, "_workspaces") and self._workspaces else None
+        if ws is None:
+            return None
+        if key == 0xB5:  # Fn+Up
+            self._disarm_ctrl(repaint=False)
+            ws.scroll_up_history()
+            self._paint_session()
+            return True
+        elif key == 0xB6:  # Fn+Down
+            self._disarm_ctrl(repaint=False)
+            ws.scroll_down_history()
+            self._paint_session()
+            return True
+        return None
+
     def _handle_chord(self, key: int) -> bool | None:
         """
-        Handle resize, Ctrl latch, or workspace chords, returning bool if handled.
+        Handle resize, Ctrl latch, workspace, or scrollback viewport chords, returning bool if handled.
 
         Args:
         - key (`int`): Key byte to check against registered chords.
@@ -1121,6 +1222,9 @@ class _ShellSession:
         `bool | None`: ``True`` if handled and consumed, else ``None``.
 
         """
+        scroll_handled = self._handle_scroll_chord(key)
+        if scroll_handled is not None:
+            return scroll_handled
         if key in RESIZE_CHORDS:
             return self._handle_resize_chord()
         if key in CTRL_LATCH_CHORDS:
@@ -1225,5 +1329,9 @@ class _ShellSession:
         now = time.monotonic()
         if now - self._last_keyframe >= interval:
             self._last_keyframe = now
+            if self._status_bar is not None:
+                self._status_bar.refresh_telemetry()
+                self._status_bar._dirty = True
+            self._bridge._prev = None
             self._paint_session()
             tracepoint("terminal.keyframe", font_size=self._bridge._font_size)

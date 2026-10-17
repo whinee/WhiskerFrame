@@ -64,10 +64,10 @@ def test_workspace_geometry_rebuild_reflow_and_gutter():
     # Create workspace
     wm.create_workspace(user="root")
 
-    geo_narrow = TerminalGeometry.for_font_size(2) # 26x15
+    geo_narrow = TerminalGeometry.for_font_size(5) # 40x20
     wm.rebuild_geometry(geo_narrow)
 
     assert bridge.cleared is True, "Hardware panel must be cleared on geometry rebuild to scrub gutters"
     assert bridge.painted is True, "Screen must be repainted after geometry rebuild"
-    assert wm.active_workspace.grid.cols == 26
-    assert wm.active_workspace.grid.rows == 15
+    assert wm.active_workspace.grid.cols == 40
+    assert wm.active_workspace.grid.rows == 20

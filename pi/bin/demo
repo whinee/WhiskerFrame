@@ -562,27 +562,21 @@ def run_demo_art(
 
 def print_demo_sandbox_banner() -> int:
     """
-    Print the restricted guest sandbox banner and live deck telemetry.
-
-    Formatted strictly to <= 53 columns for the CYD terminal.
+    Print the restricted guest sandbox banner and live deck telemetry,
+    adapting responsively to all supported terminal geometries (53x30, 40x20, 26x15, 17x10).
     """
+    try:
+        size = os.get_terminal_size()
+        cols = size.columns
+        rows = size.lines
+    except (AttributeError, OSError, ValueError):
+        cols, rows = 53, 30
+
     # Clear screen first
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
 
-    print("=====================================================")
-    print("       Whiskerframe Cyberdeck v0.1 Demo Sandbox      ")
-    print("=====================================================")
-    print("")
-    print("Welcome, guest! Restricted kernel sandbox:")
-    print(" - Network: 100% Isolated (nftables egress drop)")
-    print(" - Memory: 64MB Cgroup Slice | CPU Quota: 50%")
-    print(" - Execution Limit: 5s max / process (Reaper)")
-    print(" - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)")
-    print("")
-    print("--- Live Deck Telemetry ---")
-
-    # Uptime
+    # Gather telemetry helpers
     uptime_str = "unknown"
     try:
         res = subprocess.run(
@@ -597,52 +591,90 @@ def print_demo_sandbox_banner() -> int:
             with Path("/proc/uptime").open() as f:
                 sec = float(f.read().split()[0])
                 mins = int(sec // 60)
-                uptime_str = f"up {mins} minutes"
+                uptime_str = f"up {mins}m"
     except Exception:
         pass
-    print(f"Uptime: {uptime_str}")
 
-    # Battery
+    batt_str = "12.4V (95%)"
     batt_json = Path("/run/battery_monitor/status.json")
     if batt_json.is_file():
         try:
             import json
-
             data = json.loads(batt_json.read_text())
             v = data.get("bus_voltage_v", 12.4)
             p = data.get("battery_percent", 95)
-            print(f"Power: {v:.1f}V ({int(p)}% battery)")
+            batt_str = f"{v:.1f}V ({int(p)}%)"
         except Exception:
-            print("Power: 12.4V (95% battery)")
+            pass
 
-    # Thermals
+    temp_str = "60.0°C"
     thermal_file = Path("/sys/class/thermal/thermal_zone0/temp")
     if thermal_file.is_file():
         try:
             temp_raw = int(thermal_file.read_text().strip())
             temp_c = temp_raw / 1000.0
-            print(f"Thermals: {temp_c:.1f}°C")
+            temp_str = f"{temp_c:.1f}°C"
         except Exception:
-            print("Thermals: 60.0°C")
+            pass
+
+    if cols >= 45 and rows >= 25:
+        # Full (53x30)
+        print("=====================================================")
+        print("       Whiskerframe Cyberdeck v0.1 Demo Sandbox      ")
+        print("=====================================================")
+        print("")
+        print("Welcome, guest! Restricted kernel sandbox:")
+        print(" - Network: 100% Isolated (nftables egress drop)")
+        print(" - Memory: 64MB Cgroup Slice | CPU Quota: 50%")
+        print(" - Execution Limit: 5s max / process (Reaper)")
+        print(" - Filesystem: Ephemeral 8MB tmpfs (wiped on logout)")
+        print("")
+        print("--- Live Deck Telemetry ---")
+        print(f"Uptime: {uptime_str}")
+        print(f"Power: {batt_str}")
+        print(f"Thermals: {temp_str}")
+        print("")
+        print("Try running safe commands, or type 'exit' to log out.")
+        print("=====================================================")
+    elif cols >= 35 and rows >= 18:
+        # Medium (40x20)
+        print("========================================")
+        print("   Whiskerframe Cyberdeck Demo Sandbox  ")
+        print("========================================")
+        print("Welcome guest! Restricted sandbox:")
+        print(" - Net: 100% Isolated (nftables)")
+        print(" - Mem: 64MB | CPU: 50% | Limit: 5s")
+        print(" - FS: Ephemeral 8MB tmpfs")
+        print("")
+        print("--- Telemetry ---")
+        print(f"Uptime: {uptime_str}")
+        print(f"Power: {batt_str} | Temp: {temp_str}")
+        print("Type 'exit' to log out.")
+        print("========================================")
+    elif cols >= 24 and rows >= 12:
+        # Compact (26x15)
+        print("==========================")
+        print("   Cyberdeck Demo (Guest) ")
+        print("==========================")
+        print("Isolated sandbox active.")
+        print("- Net: Dropped")
+        print("- FS: Ephemeral tmpfs")
+        print("")
+        print(f"Up: {uptime_str}")
+        print(f"Pwr: {batt_str} T: {temp_str}")
+        print("Type 'exit' to quit.")
+        print("==========================")
     else:
-        print("Thermals: 60.0°C")
-
-    # Memory
-    mem_avail = "200M"
-    try:
-        with Path("/proc/meminfo").open() as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    kb = int(line.split()[1])
-                    mem_avail = f"{kb // 1024}M"
-                    break
-    except Exception:
-        pass
-    print(f"Memory Available: {mem_avail}")
-
-    print("")
-    print("Try running safe commands, or type 'exit' to log out.")
-    print("=====================================================")
+        # Micro (17x10)
+        print("=================")
+        print(" Cyberdeck Demo  ")
+        print("=================")
+        print("Guest Sandbox")
+        print("Isolated & Safe")
+        print(f"Up: {uptime_str}")
+        print(f"Pwr: {batt_str}")
+        print("Exit to logout")
+        print("=================")
     return 0
 
 

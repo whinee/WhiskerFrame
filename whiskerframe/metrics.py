@@ -56,7 +56,6 @@ DEFAULT_FONT_SIZE: int = 1
 
 FONT_METRICS: dict[int, FontMetrics] = {
     1: FontMetrics(cell_width=6, cell_height=8, line_advance=8),
-    2: FontMetrics(cell_width=12, cell_height=16, line_advance=16),
     3: FontMetrics(cell_width=18, cell_height=24, line_advance=24),
     4: FontMetrics(cell_width=24, cell_height=32, line_advance=32),
     5: FontMetrics(cell_width=8, cell_height=12, line_advance=12),
