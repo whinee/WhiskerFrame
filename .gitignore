@@ -494,3 +494,4 @@ assets/images/goodbye*
 !firmware/dist/
 !firmware/dist/**
 
+/dev/values/constants/main.yaml
