@@ -485,3 +485,4 @@ assets/images/cess/*-composite.*
 assets/images/*-preview.*
 assets/images/goodbye*
 
+/dev/values/constants/main.yaml
